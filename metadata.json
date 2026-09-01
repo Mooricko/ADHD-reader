@@ -1,0 +1,6 @@
+{
+  "name": "ADHD Reader",
+  "description": "Word-by-word RSVP focus reader with middle-letter highlighting to help people with ADHD read faster and stay engaged.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
