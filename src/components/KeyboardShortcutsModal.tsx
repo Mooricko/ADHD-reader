@@ -29,6 +29,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     { key: 'F', desc: 'Toggle Fullscreen distraction-free mode' },
     { key: 'M', desc: 'Switch between RSVP and Full Text Flow mode' },
     { key: 'S', desc: 'Toggle Metronome focus sound' },
+    { key: 'V', desc: 'Toggle Voice-Over Narration (Web Speech API)' },
     { key: 'Esc', desc: 'Close modals / Exit Fullscreen' },
   ];
 

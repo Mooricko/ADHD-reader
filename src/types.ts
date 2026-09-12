@@ -38,6 +38,11 @@ export interface ReaderSettings {
   showReticleGuides: boolean;
   showContextWords: boolean; // faint preview of previous and next word
   opticalCenterLock: boolean; // lock middle letters to exact center anchor
+  speechNarration: boolean; // Web Speech API voice-over narration toggle
+  speechVoiceURI: string; // Voice URI or empty string for default
+  speechPitch: number; // 0.5 to 1.5 (default 1.0)
+  speechVolume: number; // 0 to 1 (default 1.0)
+  speechRateMultiplier: number; // Fine-tuning rate multiplier (0.7 to 1.3, default 1.0)
 }
 
 export interface SavedDocument {

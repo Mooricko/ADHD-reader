@@ -13,13 +13,15 @@ import {
   ChevronLeft, 
   ChevronRight,
   Crosshair,
-  Volume2
+  Volume2,
+  Headphones
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { HighlightedWordParts, ReaderSettings } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
+import { speechNarrator } from '../utils/speechNarration';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -52,6 +54,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   const currentIndexRef = useRef(currentIndex);
   const settingsRef = useRef(settings);
   const wordsRef = useRef(words);
+  const onTogglePlayRef = useRef(onTogglePlay);
+  const onIndexChangeRef = useRef(onIndexChange);
 
   // Keep refs updated for timer recursion without re-binding
   useEffect(() => {
@@ -59,18 +63,58 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     currentIndexRef.current = currentIndex;
     settingsRef.current = settings;
     wordsRef.current = words;
-  }, [isPlaying, currentIndex, settings, words]);
+    onTogglePlayRef.current = onTogglePlay;
+    onIndexChangeRef.current = onIndexChange;
+  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange]);
 
-  // Main playback timer loop with dynamic pauses
+  // Main playback loop (Web Speech API Narration OR Visual RSVP Timer)
   useEffect(() => {
     if (!isPlaying || words.length === 0) {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      speechNarrator.stop();
       return;
     }
 
+    // MODE A: Web Speech API Narration (Voice-Over in Sync)
+    if (settings.speechNarration) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+
+      speechNarrator.speakFromIndex({
+        words: wordsRef.current,
+        startIndex: currentIndexRef.current,
+        settings: settingsRef.current,
+        onWordSync: (syncedIdx) => {
+          onIndexChangeRef.current(syncedIdx);
+          if (settingsRef.current.metronomeSound) {
+            const currentW = wordsRef.current[syncedIdx];
+            metronome.playTick(settingsRef.current.metronomeVolume, currentW?.hasSentenceEnd);
+          }
+        },
+        onFinished: () => {
+          onTogglePlayRef.current();
+          setHasFinished(true);
+          confetti({
+            particleCount: 80,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#a855f7'],
+          });
+        },
+        isPlayingCheck: () => isPlayingRef.current,
+      });
+
+      return () => {
+        speechNarrator.stop();
+      };
+    }
+
+    // MODE B: Standard Visual RSVP Timer
     const scheduleNextWord = () => {
       if (!isPlayingRef.current) return;
 
@@ -79,7 +123,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
 
       if (currIdx >= allWords.length - 1) {
         // Reached the end of text!
-        onTogglePlay();
+        onTogglePlayRef.current();
         setHasFinished(true);
         confetti({
           particleCount: 80,
@@ -91,7 +135,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       }
 
       const nextIdx = currIdx + 1;
-      onIndexChange(nextIdx);
+      onIndexChangeRef.current(nextIdx);
 
       // Play subtle metronome tick if enabled
       if (settingsRef.current.metronomeSound) {
@@ -110,7 +154,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     };
 
     // Calculate initial delay for the first word
-    const currentWord = words[currentIndex] || words[0];
+    const currentWord = words[currentIndexRef.current] || words[0];
     const initialDelay = currentWord
       ? calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause)
       : (60 / settings.wpm) * 1000;
@@ -126,20 +170,85 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      speechNarrator.stop();
     };
-  }, [isPlaying, settings.wpm, settings.smartPunctuationPause, settings.metronomeSound, settings.metronomeVolume, onIndexChange, onTogglePlay, words]);
+  }, [
+    isPlaying, 
+    settings.speechNarration, 
+    settings.speechVoiceURI, 
+    settings.speechPitch, 
+    settings.speechVolume, 
+    settings.speechRateMultiplier, 
+    settings.wpm, 
+    settings.smartPunctuationPause, 
+    settings.metronomeSound, 
+    settings.metronomeVolume, 
+    words
+  ]);
 
   // Handle manual jumps
   const handleJump = useCallback((offset: number) => {
     setHasFinished(false);
     const newIdx = Math.max(0, Math.min(words.length - 1, currentIndex + offset));
     onIndexChange(newIdx);
-  }, [currentIndex, words.length, onIndexChange]);
+
+    if (settings.speechNarration && isPlaying) {
+      speechNarrator.stop();
+      speechNarrator.speakFromIndex({
+        words: wordsRef.current,
+        startIndex: newIdx,
+        settings: settingsRef.current,
+        onWordSync: (syncedIdx) => {
+          onIndexChange(syncedIdx);
+          if (settingsRef.current.metronomeSound) {
+            metronome.playTick(settingsRef.current.metronomeVolume, wordsRef.current[syncedIdx]?.hasSentenceEnd);
+          }
+        },
+        onFinished: () => {
+          onTogglePlay();
+          setHasFinished(true);
+          confetti({
+            particleCount: 80,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#a855f7'],
+          });
+        },
+        isPlayingCheck: () => isPlayingRef.current,
+      });
+    }
+  }, [currentIndex, words.length, onIndexChange, settings.speechNarration, isPlaying, onTogglePlay]);
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
     setHasFinished(false);
     onIndexChange(val);
+
+    if (settings.speechNarration && isPlaying) {
+      speechNarrator.stop();
+      speechNarrator.speakFromIndex({
+        words: wordsRef.current,
+        startIndex: val,
+        settings: settingsRef.current,
+        onWordSync: (syncedIdx) => {
+          onIndexChange(syncedIdx);
+          if (settingsRef.current.metronomeSound) {
+            metronome.playTick(settingsRef.current.metronomeVolume, wordsRef.current[syncedIdx]?.hasSentenceEnd);
+          }
+        },
+        onFinished: () => {
+          onTogglePlay();
+          setHasFinished(true);
+          confetti({
+            particleCount: 80,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#a855f7'],
+          });
+        },
+        isPlayingCheck: () => isPlayingRef.current,
+      });
+    }
   };
 
   const handleSpeedPreset = (speed: number) => {
@@ -489,6 +598,22 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
                 +
               </button>
             </div>
+
+            {/* Quick Voice-Over Narration Toggle */}
+            <button
+              id="rsvp-quick-voice-toggle"
+              type="button"
+              onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
+              title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Narration (Reads words aloud)'}
+              aria-label="Toggle Voice-Over Narration"
+              className={`p-2.5 rounded-xl border transition-all ${
+                settings.speechNarration
+                  ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs'
+                  : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+              }`}
+            >
+              <Headphones className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>

@@ -44,6 +44,11 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   showReticleGuides: true,
   showContextWords: false,
   opticalCenterLock: true,
+  speechNarration: false,
+  speechVoiceURI: '',
+  speechPitch: 1.0,
+  speechVolume: 1.0,
+  speechRateMultiplier: 1.0,
 };
 
 const STORAGE_KEYS = {
@@ -218,23 +223,23 @@ export default function App() {
       return false;
     };
 
+    let timer1: NodeJS.Timeout | null = null;
+    let timer2: NodeJS.Timeout | null = null;
+
     // Immediate check
     checkCapturedText().then((found) => {
       // If not immediately found in storage, check again after short intervals
       // to account for any storage I/O delay between background worker & tab launch
       if (!found && isMounted) {
-        const timer1 = setTimeout(checkCapturedText, 150);
-        const timer2 = setTimeout(checkCapturedText, 500);
-        return () => {
-          clearTimeout(timer1);
-          clearTimeout(timer2);
-        };
+        timer1 = setTimeout(checkCapturedText, 150);
+        timer2 = setTimeout(checkCapturedText, 500);
       }
     });
 
     // Listen for real-time messages from extension background / content script
+    let messageListener: ((message: any) => void) | null = null;
     if (typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
-      const messageListener = (message: any) => {
+      messageListener = (message: any) => {
         if (message.action === 'NEW_CAPTURED_TEXT' && message.text) {
           handleApplyText(message.text, message.title || 'Web Selection');
           showToast(`⚡ Captured highlighted text: "${message.title || 'Web Selection'}"`);
@@ -242,14 +247,15 @@ export default function App() {
       };
 
       chrome.runtime.onMessage.addListener(messageListener);
-      return () => {
-        isMounted = false;
-        chrome.runtime.onMessage.removeListener(messageListener);
-      };
     }
 
     return () => {
       isMounted = false;
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      if (messageListener && typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
+        chrome.runtime.onMessage.removeListener(messageListener);
+      }
     };
   }, [handleApplyText, showToast]);
 
@@ -275,15 +281,25 @@ export default function App() {
     }
   }, []);
 
+  const currentIndexRef = useRef(currentIndex);
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  const parsedWordsLengthRef = useRef(parsedWords.length);
+  useEffect(() => {
+    parsedWordsLengthRef.current = parsedWords.length;
+  }, [parsedWords.length]);
+
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => {
-      if (!prev && currentIndex >= parsedWords.length - 1) {
+      if (!prev && currentIndexRef.current >= parsedWordsLengthRef.current - 1) {
         handleIndexChange(0);
         return true;
       }
       return !prev;
     });
-  }, [currentIndex, parsedWords.length, handleIndexChange]);
+  }, [handleIndexChange]);
 
   const handleRestart = useCallback(() => {
     setIsPlaying(false);
@@ -346,6 +362,9 @@ export default function App() {
         setViewMode((m) => (m === 'rsvp' ? 'flow' : 'rsvp'));
       } else if (e.key === 's' || e.key === 'S') {
         handleUpdateSettings({ metronomeSound: !settings.metronomeSound });
+      } else if (e.key === 'v' || e.key === 'V') {
+        handleUpdateSettings({ speechNarration: !settings.speechNarration });
+        showToast(!settings.speechNarration ? '🎙️ Voice-Over Narration Enabled' : '🔇 Voice-Over Narration Disabled');
       } else if (e.code === 'Escape') {
         setIsTextInputOpen(false);
         setIsSettingsOpen(false);

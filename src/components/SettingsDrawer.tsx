@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Type, 
@@ -6,11 +6,16 @@ import {
   Eye, 
   Sliders, 
   Volume2, 
+  VolumeX,
   Crosshair, 
   Check,
   RotateCcw,
   Sparkles,
-  Zap
+  Zap,
+  Headphones,
+  Mic,
+  Play,
+  PlayCircle
 } from 'lucide-react';
 import { 
   ReaderSettings, 
@@ -24,6 +29,7 @@ import {
   HIGHLIGHT_COLORS, 
   FONT_CONFIGS 
 } from '../utils/themeStyles';
+import { speechNarrator, VoiceOption } from '../utils/speechNarration';
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -40,6 +46,33 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   onUpdateSettings,
   onResetDefaults,
 }) => {
+  const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const isSpeechSupported = speechNarrator.isSupported();
+
+  useEffect(() => {
+    if (!isSpeechSupported) return;
+    setAvailableVoices(speechNarrator.getVoices());
+    const unsub = speechNarrator.onVoicesChanged(() => {
+      setAvailableVoices(speechNarrator.getVoices());
+    });
+    return unsub;
+  }, [isSpeechSupported]);
+
+  const handlePreviewVoice = () => {
+    if (!isSpeechSupported) return;
+    setIsPreviewPlaying(true);
+    speechNarrator.previewVoice(
+      settings.speechVoiceURI,
+      settings.speechPitch,
+      speechNarrator.computeSpeechRate(settings.wpm, settings.speechRateMultiplier),
+      settings.speechVolume
+    );
+    setTimeout(() => {
+      setIsPreviewPlaying(false);
+    }, 2800);
+  };
+
   if (!isOpen) return null;
 
   const theme = THEME_CONFIGS[settings.theme];
@@ -336,6 +369,155 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 onChange={(e) => onUpdateSettings({ metronomeSound: e.target.checked })}
                 className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
               />
+            </div>
+          </div>
+
+          {/* 7. Web Speech API Audio Narration (Voice-Over) */}
+          <div className="space-y-3 pt-2 border-t border-slate-700/30">
+            <div className="flex items-center justify-between">
+              <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                Audio Narration (Web Speech API)
+              </label>
+              {isSpeechSupported ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  API Ready
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  Not Supported
+                </span>
+              )}
+            </div>
+
+            {/* Primary Voice-Over Toggle */}
+            <div className={`p-3.5 rounded-xl border transition-all ${
+              settings.speechNarration 
+                ? 'border-red-500/40 bg-red-500/5 shadow-xs' 
+                : 'border-white/5 bg-black/10'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-lg ${
+                    settings.speechNarration 
+                      ? 'bg-red-500 text-white shadow-xs' 
+                      : `${theme.accentSurface} ${theme.textMuted}`
+                  }`}>
+                    <Headphones className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className={`text-xs font-bold ${theme.textPrimary}`}>
+                      Voice-Over Narration
+                    </div>
+                    <div className={`text-[11px] ${theme.textMuted}`}>
+                      Reads words aloud in sync with visual RSVP playback
+                    </div>
+                  </div>
+                </div>
+
+                <input
+                  id="toggle-voice-narration"
+                  type="checkbox"
+                  disabled={!isSpeechSupported}
+                  checked={settings.speechNarration}
+                  onChange={(e) => onUpdateSettings({ speechNarration: e.target.checked })}
+                  className="w-5 h-5 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0 cursor-pointer disabled:opacity-40"
+                />
+              </div>
+
+              {settings.speechNarration && (
+                <div className="mt-4 pt-3 border-t border-slate-700/30 space-y-4 animate-in fade-in duration-200">
+                  {/* Voice Selector */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[11px] font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                        Selected Voice Provider
+                      </span>
+                      <button
+                        id="test-voice-preview-btn"
+                        type="button"
+                        onClick={handlePreviewVoice}
+                        disabled={isPreviewPlaying}
+                        className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>{isPreviewPlaying ? 'Speaking...' : 'Test Voice'}</span>
+                      </button>
+                    </div>
+
+                    <select
+                      id="speech-voice-select"
+                      value={settings.speechVoiceURI || ''}
+                      onChange={(e) => onUpdateSettings({ speechVoiceURI: e.target.value })}
+                      aria-label="Select Voice"
+                      className={`w-full p-2.5 rounded-xl border text-xs font-medium ${theme.borderClass} ${theme.inputBg} ${theme.textPrimary} focus:outline-none focus:border-red-500 transition-colors cursor-pointer`}
+                    >
+                      <option value="">Default System Voice (Auto-detect)</option>
+                      {availableVoices.map((v) => (
+                        <option key={v.voiceURI} value={v.voiceURI}>
+                          {v.name} ({v.lang}) — {v.provider}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Voice Pitch & Volume Sliders */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Pitch */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={`font-semibold ${theme.textMuted}`}>Pitch</span>
+                        <span className={`font-mono font-bold ${theme.textPrimary}`}>
+                          {settings.speechPitch.toFixed(1)}x
+                        </span>
+                      </div>
+                      <input
+                        id="speech-pitch-slider"
+                        type="range"
+                        min="0.6"
+                        max="1.4"
+                        step="0.1"
+                        value={settings.speechPitch}
+                        onChange={(e) => onUpdateSettings({ speechPitch: parseFloat(e.target.value) })}
+                        className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
+                      />
+                    </div>
+
+                    {/* Volume */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className={`font-semibold ${theme.textMuted}`}>Volume</span>
+                        <span className={`font-mono font-bold ${theme.textPrimary}`}>
+                          {Math.round(settings.speechVolume * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        id="speech-volume-slider"
+                        type="range"
+                        min="0.1"
+                        max="1"
+                        step="0.05"
+                        value={settings.speechVolume}
+                        onChange={(e) => onUpdateSettings({ speechVolume: parseFloat(e.target.value) })}
+                        className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* RSVP Speed Synchronization Info */}
+                  <div className="p-2.5 rounded-lg bg-black/25 border border-white/5 space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-slate-300">RSVP Synchronization</span>
+                      <span className="font-mono font-bold text-red-400">
+                        {settings.wpm} WPM ({speechNarrator.computeSpeechRate(settings.wpm, settings.speechRateMultiplier)}x rate)
+                      </span>
+                    </div>
+                    <p className={`text-[10px] ${theme.textMuted} leading-relaxed`}>
+                      Speech synthesis speed automatically tracks your RSVP WPM, locking vocal word boundaries to the center visual highlight.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

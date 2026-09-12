@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { 
   Play, 
   Pause, 
@@ -7,10 +7,13 @@ import {
   Rewind, 
   Eye, 
   CheckCircle2, 
-  Clock 
+  Clock,
+  Headphones
 } from 'lucide-react';
 import { HighlightedWordParts, ReaderSettings } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
+import { calculateWordDelayMs } from '../utils/textParser';
+import { speechNarrator } from '../utils/speechNarration';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -40,6 +43,109 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const font = FONT_CONFIGS[settings.fontFamily];
   const activeWordRef = useRef<HTMLSpanElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isPlayingRef = useRef(isPlaying);
+  const currentIndexRef = useRef(currentIndex);
+  const settingsRef = useRef(settings);
+  const wordsRef = useRef(words);
+  const onTogglePlayRef = useRef(onTogglePlay);
+  const onIndexChangeRef = useRef(onIndexChange);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    currentIndexRef.current = currentIndex;
+    settingsRef.current = settings;
+    wordsRef.current = words;
+    onTogglePlayRef.current = onTogglePlay;
+    onIndexChangeRef.current = onIndexChange;
+  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange]);
+
+  // Playback timer & Speech Narration loop in Flow Mode
+  useEffect(() => {
+    if (!isPlaying || words.length === 0) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      speechNarrator.stop();
+      return;
+    }
+
+    if (settings.speechNarration) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+
+      speechNarrator.speakFromIndex({
+        words: wordsRef.current,
+        startIndex: currentIndexRef.current,
+        settings: settingsRef.current,
+        onWordSync: (syncedIdx) => {
+          onIndexChangeRef.current(syncedIdx);
+        },
+        onFinished: () => {
+          onTogglePlayRef.current();
+        },
+        isPlayingCheck: () => isPlayingRef.current,
+      });
+
+      return () => {
+        speechNarrator.stop();
+      };
+    }
+
+    // Standard auto-tracking timer loop
+    const scheduleNextWord = () => {
+      if (!isPlayingRef.current) return;
+
+      const currIdx = currentIndexRef.current;
+      const allWords = wordsRef.current;
+
+      if (currIdx >= allWords.length - 1) {
+        onTogglePlayRef.current();
+        return;
+      }
+
+      const nextIdx = currIdx + 1;
+      onIndexChangeRef.current(nextIdx);
+
+      const currentWord = allWords[nextIdx];
+      const delay = calculateWordDelayMs(
+        currentWord,
+        settingsRef.current.wpm,
+        settingsRef.current.smartPunctuationPause
+      );
+
+      timerRef.current = setTimeout(scheduleNextWord, delay);
+    };
+
+    const currentWord = words[currentIndexRef.current] || words[0];
+    const initialDelay = currentWord
+      ? calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause)
+      : (60 / settings.wpm) * 1000;
+
+    timerRef.current = setTimeout(scheduleNextWord, initialDelay);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      speechNarrator.stop();
+    };
+  }, [
+    isPlaying,
+    settings.speechNarration,
+    settings.speechVoiceURI,
+    settings.speechPitch,
+    settings.speechVolume,
+    settings.speechRateMultiplier,
+    settings.wpm,
+    settings.smartPunctuationPause,
+    words
+  ]);
 
   // Auto-scroll to active word smoothly if playing
   useEffect(() => {
@@ -201,6 +307,22 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
               +
             </button>
           </div>
+
+          {/* Quick Voice-Over Narration Toggle */}
+          <button
+            id="flow-voice-toggle-btn"
+            type="button"
+            onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
+            title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Audio Narration'}
+            aria-label="Toggle Voice-Over Narration"
+            className={`p-2 rounded-xl border transition-all ${
+              settings.speechNarration
+                ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs'
+                : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary}`
+            }`}
+          >
+            <Headphones className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
