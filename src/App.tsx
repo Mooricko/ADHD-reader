@@ -202,18 +202,35 @@ export default function App() {
     }
   }, []);
 
-  // Check for captured text from Chrome Extension (storage or runtime message)
+  // Check for captured text from Chrome Extension (URL params, storage, or runtime message)
   useEffect(() => {
-    const checkCapturedText = async () => {
+    let isMounted = true;
+
+    const checkCapturedText = async (): Promise<boolean> => {
       const stored = await getStoredCapturedText();
       if (stored && stored.text && stored.text.trim()) {
+        if (!isMounted) return true;
         handleApplyText(stored.text, stored.title || 'Web Selection');
         showToast(`⚡ Loaded highlighted text from ${stored.title || 'webpage'}`);
         await clearStoredCapturedText();
+        return true;
       }
+      return false;
     };
 
-    checkCapturedText();
+    // Immediate check
+    checkCapturedText().then((found) => {
+      // If not immediately found in storage, check again after short intervals
+      // to account for any storage I/O delay between background worker & tab launch
+      if (!found && isMounted) {
+        const timer1 = setTimeout(checkCapturedText, 150);
+        const timer2 = setTimeout(checkCapturedText, 500);
+        return () => {
+          clearTimeout(timer1);
+          clearTimeout(timer2);
+        };
+      }
+    });
 
     // Listen for real-time messages from extension background / content script
     if (typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
@@ -226,9 +243,14 @@ export default function App() {
 
       chrome.runtime.onMessage.addListener(messageListener);
       return () => {
+        isMounted = false;
         chrome.runtime.onMessage.removeListener(messageListener);
       };
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [handleApplyText, showToast]);
 
   const handleDeleteDocument = useCallback((id: string) => {

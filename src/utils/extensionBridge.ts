@@ -98,10 +98,40 @@ export async function captureActiveTabText(): Promise<CapturedPayload | null> {
 }
 
 /**
- * Check chrome.storage.local for captured text from context menu or content script
+ * Check URL params and chrome.storage.local for captured text from context menu or content script
  */
 export async function getStoredCapturedText(): Promise<CapturedPayload | null> {
-  if (!isChromeExtensionEnvironment() || !chrome.storage?.local) {
+  // 1. Check URL query parameters first (instant, synchronous, highly reliable)
+  if (typeof window !== 'undefined' && window.location.search) {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const captureText = urlParams.get('captureText');
+      const captureTitle = urlParams.get('captureTitle');
+      const captureUrl = urlParams.get('captureUrl');
+
+      if (captureText && captureText.trim()) {
+        // Clean URL to prevent re-capturing on refresh
+        try {
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+        } catch {
+          // ignore
+        }
+
+        return {
+          text: decodeURIComponent(captureText),
+          title: captureTitle ? decodeURIComponent(captureTitle) : 'Captured Web Selection',
+          url: captureUrl ? decodeURIComponent(captureUrl) : '',
+          timestamp: Date.now()
+        };
+      }
+    } catch (e) {
+      console.warn('Error reading URL params:', e);
+    }
+  }
+
+  // 2. Check chrome.storage.local
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) {
     return null;
   }
 
@@ -126,7 +156,7 @@ export async function getStoredCapturedText(): Promise<CapturedPayload | null> {
  * Clear captured text from storage after applying
  */
 export async function clearStoredCapturedText(): Promise<void> {
-  if (isChromeExtensionEnvironment() && chrome.storage?.local) {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     await chrome.storage.local.remove(['capturedText', 'capturedTitle', 'capturedUrl', 'capturedTime']);
   }
 }

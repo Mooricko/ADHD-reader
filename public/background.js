@@ -77,36 +77,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 async function saveCapturedTextAndOpen(text, title, url) {
   const timestamp = Date.now();
-  await chrome.storage.local.set({
-    capturedText: text,
-    capturedTitle: title || 'Captured Webpage Text',
-    capturedUrl: url || '',
-    capturedTime: timestamp
-  });
+  const cleanTitle = (title || 'Captured Webpage Text').slice(0, 150);
 
-  // Check if an ADHD Reader tab is already open
-  const existingTabs = await chrome.tabs.query({
-    url: chrome.runtime.getURL('index.html*')
-  });
-
-  if (existingTabs.length > 0) {
-    // Focus existing reader tab and notify it
-    const readerTab = existingTabs[0];
-    await chrome.tabs.update(readerTab.id, { active: true });
-    if (readerTab.windowId) {
-      await chrome.windows.update(readerTab.windowId, { focused: true });
-    }
-    chrome.tabs.sendMessage(readerTab.id, {
-      action: 'NEW_CAPTURED_TEXT',
-      text,
-      title,
-      url,
-      timestamp
-    }).catch(() => {});
-  } else {
-    // Open a new dedicated ADHD Reader tab
-    await chrome.tabs.create({
-      url: chrome.runtime.getURL('index.html?source=web-capture')
+  // 1. Store in chrome.storage.local for full text persistence
+  try {
+    await chrome.storage.local.set({
+      capturedText: text,
+      capturedTitle: cleanTitle,
+      capturedUrl: url || '',
+      capturedTime: timestamp
     });
+  } catch (err) {
+    console.warn('ADHD Reader storage error:', err);
+  }
+
+  // 2. Build URL with query params for instant synchronous loading (up to 2000 chars)
+  const safeTextParam = text && text.length <= 2000 
+    ? `&captureText=${encodeURIComponent(text)}` 
+    : '';
+  const safeTitleParam = cleanTitle 
+    ? `&captureTitle=${encodeURIComponent(cleanTitle)}` 
+    : '';
+  const safeUrlParam = url 
+    ? `&captureUrl=${encodeURIComponent(url)}` 
+    : '';
+
+  const targetUrl = chrome.runtime.getURL(
+    `index.html?source=web-capture${safeTitleParam}${safeUrlParam}${safeTextParam}`
+  );
+
+  // 3. Check if an ADHD Reader tab is already open
+  try {
+    const readerBaseUrl = chrome.runtime.getURL('index.html');
+    const tabs = await chrome.tabs.query({});
+    const readerTab = tabs.find(t => t.url && t.url.startsWith(readerBaseUrl));
+
+    if (readerTab && readerTab.id) {
+      // Focus existing reader tab and notify it
+      await chrome.tabs.update(readerTab.id, { active: true });
+      if (readerTab.windowId) {
+        await chrome.windows.update(readerTab.windowId, { focused: true });
+      }
+      chrome.tabs.sendMessage(readerTab.id, {
+        action: 'NEW_CAPTURED_TEXT',
+        text,
+        title: cleanTitle,
+        url: url || '',
+        timestamp
+      }).catch(() => {});
+      return;
+    }
+  } catch (err) {
+    console.debug('Could not query tabs, opening new tab:', err);
+  }
+
+  // 4. Open a new dedicated ADHD Reader tab
+  try {
+    await chrome.tabs.create({
+      url: targetUrl
+    });
+  } catch (err) {
+    console.error('Failed to create ADHD Reader tab:', err);
   }
 }

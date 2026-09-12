@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Word-by-word RSVP focus reader highlighting the two middle letters in red. Capture highlighted text from any webpage with one click.",
   "permissions": [
+    "tabs",
     "activeTab",
     "scripting",
     "contextMenus",
@@ -11,6 +12,15 @@
   ],
   "host_permissions": [
     "<all_urls>"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:;"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*", "content.css"],
+      "matches": ["<all_urls>"]
+    }
   ],
   "action": {
     "default_popup": "index.html",

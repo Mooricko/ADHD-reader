@@ -73,9 +73,17 @@
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage(payload, (response) => {
-          // Fallback or confirmation
           if (chrome.runtime.lastError) {
-            console.debug('ADHD Reader background message:', chrome.runtime.lastError.message);
+            console.debug('ADHD Reader background message fallback:', chrome.runtime.lastError.message);
+            // Fallback: direct window.open if background worker is temporarily unresponsive
+            try {
+              const directUrl = chrome.runtime.getURL(
+                `index.html?source=web-capture&captureTitle=${encodeURIComponent(payload.title)}&captureText=${encodeURIComponent(text.slice(0, 2000))}`
+              );
+              window.open(directUrl, '_blank');
+            } catch (err) {
+              console.warn('Fallback tab open failed:', err);
+            }
           }
         });
       }
