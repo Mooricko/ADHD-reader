@@ -10,12 +10,15 @@ import {
   BookOpen, 
   Clipboard,
   History,
-  Layers
+  Layers,
+  Puzzle,
+  Zap
 } from 'lucide-react';
 import { ReaderSettings, SavedDocument } from '../types';
 import { SAMPLE_TEXTS } from '../data/sampleTexts';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
 import { calculateTextStats } from '../utils/textParser';
+import { captureActiveTabText, isChromeExtensionEnvironment } from '../utils/extensionBridge';
 
 interface TextInputModalProps {
   isOpen: boolean;
@@ -26,6 +29,7 @@ interface TextInputModalProps {
   savedDocuments: SavedDocument[];
   onSaveDocument: (doc: SavedDocument) => void;
   onDeleteDocument: (id: string) => void;
+  onOpenExtensionHub?: () => void;
   settings: ReaderSettings;
 }
 
@@ -37,6 +41,7 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
   onApplyText,
   savedDocuments,
   onDeleteDocument,
+  onOpenExtensionHub,
   settings,
 }) => {
   const [activeTab, setActiveTab] = useState<'custom' | 'samples' | 'history'>('custom');
@@ -207,7 +212,19 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
                     Paste Content
                   </label>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {onOpenExtensionHub && (
+                      <button
+                        id="webpage-capture-modal-btn"
+                        type="button"
+                        onClick={onOpenExtensionHub}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-500 font-semibold hover:bg-red-500/20 transition-colors"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Capture from Webpage</span>
+                      </button>
+                    )}
+
                     <button
                       id="paste-clipboard-btn"
                       type="button"

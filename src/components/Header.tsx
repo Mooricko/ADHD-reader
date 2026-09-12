@@ -10,7 +10,9 @@ import {
   Sparkles, 
   HelpCircle,
   Eye,
-  AlignLeft
+  AlignLeft,
+  Puzzle,
+  Zap
 } from 'lucide-react';
 import { ReaderSettings, ReaderViewMode } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
@@ -23,6 +25,7 @@ interface HeaderProps {
   onOpenTextInput: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenExtensionHub: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   currentTitle: string;
@@ -36,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTextInput,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenExtensionHub,
   isFullscreen,
   onToggleFullscreen,
   currentTitle,
@@ -119,6 +123,19 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             {settings.metronomeSound ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+
+          {/* Chrome Extension & Webpage Capture Hub */}
+          <button
+            id="open-extension-hub-btn"
+            type="button"
+            onClick={onOpenExtensionHub}
+            title="Chrome Extension & Web Selection Capture (Manifest V3)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-colors text-xs font-semibold shadow-xs"
+          >
+            <Puzzle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Web Capture & Extension</span>
+            <span className="sm:hidden">Extension</span>
           </button>
 
           {/* Change Text / Library Button */}

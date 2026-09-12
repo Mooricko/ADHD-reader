@@ -19,6 +19,13 @@ import { FlowReader } from './components/FlowReader';
 import { TextInputModal } from './components/TextInputModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { ExtensionHubModal } from './components/ExtensionHubModal';
+import { 
+  isChromeExtensionEnvironment, 
+  getStoredCapturedText, 
+  clearStoredCapturedText 
+} from './utils/extensionBridge';
+import { CheckCircle2, Zap } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   wpm: 320,
@@ -111,6 +118,15 @@ export default function App() {
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isExtensionHubOpen, setIsExtensionHubOpen] = useState(false);
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastNotification(msg);
+    setTimeout(() => {
+      setToastNotification((curr) => (curr === msg ? null : curr));
+    }, 4000);
+  }, []);
 
   // Save settings on update
   const handleUpdateSettings = useCallback((updater: Partial<ReaderSettings>) => {
@@ -185,6 +201,35 @@ export default function App() {
       // Ignore
     }
   }, []);
+
+  // Check for captured text from Chrome Extension (storage or runtime message)
+  useEffect(() => {
+    const checkCapturedText = async () => {
+      const stored = await getStoredCapturedText();
+      if (stored && stored.text && stored.text.trim()) {
+        handleApplyText(stored.text, stored.title || 'Web Selection');
+        showToast(`⚡ Loaded highlighted text from ${stored.title || 'webpage'}`);
+        await clearStoredCapturedText();
+      }
+    };
+
+    checkCapturedText();
+
+    // Listen for real-time messages from extension background / content script
+    if (typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
+      const messageListener = (message: any) => {
+        if (message.action === 'NEW_CAPTURED_TEXT' && message.text) {
+          handleApplyText(message.text, message.title || 'Web Selection');
+          showToast(`⚡ Captured highlighted text: "${message.title || 'Web Selection'}"`);
+        }
+      };
+
+      chrome.runtime.onMessage.addListener(messageListener);
+      return () => {
+        chrome.runtime.onMessage.removeListener(messageListener);
+      };
+    }
+  }, [handleApplyText, showToast]);
 
   const handleDeleteDocument = useCallback((id: string) => {
     setSavedDocs((prev) => {
@@ -283,6 +328,7 @@ export default function App() {
         setIsTextInputOpen(false);
         setIsSettingsOpen(false);
         setIsShortcutsOpen(false);
+        setIsExtensionHubOpen(false);
       }
     };
 
@@ -306,6 +352,14 @@ export default function App() {
       id="adhd-reader-app"
       className={`min-h-screen flex flex-col ${currentThemeConfig.bgClass} ${currentThemeConfig.textPrimary} transition-colors duration-200`}
     >
+      {/* Toast Notification for Extension Web Capture */}
+      {toastNotification && (
+        <div className="fixed top-16 right-4 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-slate-900 border border-red-500/50 text-white shadow-2xl animate-in slide-in-from-top-2 duration-200">
+          <Zap className="w-4 h-4 text-red-500 fill-red-500 animate-pulse" />
+          <span className="text-xs font-semibold">{toastNotification}</span>
+        </div>
+      )}
+
       {/* Top Navigation / Header */}
       {!isFullscreen && (
         <Header
@@ -316,6 +370,7 @@ export default function App() {
           onOpenTextInput={() => setIsTextInputOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          onOpenExtensionHub={() => setIsExtensionHubOpen(true)}
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
           currentTitle={currentTitle}
@@ -360,6 +415,20 @@ export default function App() {
         savedDocuments={savedDocs}
         onSaveDocument={(doc) => setSavedDocs((prev) => [doc, ...prev])}
         onDeleteDocument={handleDeleteDocument}
+        onOpenExtensionHub={() => {
+          setIsTextInputOpen(false);
+          setIsExtensionHubOpen(true);
+        }}
+        settings={settings}
+      />
+
+      <ExtensionHubModal
+        isOpen={isExtensionHubOpen}
+        onClose={() => setIsExtensionHubOpen(false)}
+        onApplyCapturedText={(text, title) => {
+          handleApplyText(text, title || 'Captured Webpage Selection');
+          showToast(`⚡ Captured text loaded into ADHD Reader!`);
+        }}
         settings={settings}
       />
 
