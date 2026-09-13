@@ -29,26 +29,64 @@ class SpeechNarrationService {
   private fallbackTimer: NodeJS.Timeout | null = null;
   private hasReceivedBoundary: boolean = false;
 
+  private initialized: boolean = false;
+
   constructor() {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      this.synth = window.speechSynthesis;
+    // Lazily initialized to prevent top-level module load exceptions in restricted iframes
+  }
+
+  private getSynth(): SpeechSynthesis | null {
+    if (this.synth) return this.synth;
+    if (typeof window === 'undefined') return null;
+    try {
+      if ('speechSynthesis' in window && window.speechSynthesis) {
+        this.synth = window.speechSynthesis;
+        this.initEventListeners();
+        return this.synth;
+      }
+    } catch (e) {
+      console.warn('SpeechSynthesis access denied or restricted:', e);
+    }
+    return null;
+  }
+
+  private initEventListeners(): void {
+    if (this.initialized || !this.synth) return;
+    this.initialized = true;
+    try {
       this.loadVoices();
-      if (this.synth.onvoiceschanged !== undefined) {
+      if (typeof this.synth.addEventListener === 'function') {
+        this.synth.addEventListener('voiceschanged', () => {
+          this.loadVoices();
+        });
+      } else if ('onvoiceschanged' in this.synth) {
         this.synth.onvoiceschanged = () => {
           this.loadVoices();
         };
       }
+    } catch (e) {
+      console.warn('Could not bind voiceschanged listener:', e);
     }
   }
 
   public isSupported(): boolean {
-    return typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+    try {
+      return (
+        typeof window !== 'undefined' &&
+        'speechSynthesis' in window &&
+        Boolean(window.speechSynthesis) &&
+        'SpeechSynthesisUtterance' in window
+      );
+    } catch {
+      return false;
+    }
   }
 
   private loadVoices(): void {
-    if (!this.synth) return;
+    const synth = this.getSynth();
+    if (!synth) return;
     try {
-      const v = this.synth.getVoices();
+      const v = synth.getVoices();
       if (v && v.length > 0) {
         this.voices = v;
         this.voicesLoaded = true;
@@ -61,8 +99,13 @@ class SpeechNarrationService {
 
   public onVoicesChanged(listener: () => void): () => void {
     this.listeners.add(listener);
+    this.initEventListeners();
     if (this.voicesLoaded) {
-      listener();
+      try {
+        listener();
+      } catch (e) {
+        console.warn('Error executing voice listener:', e);
+      }
     }
     return () => {
       this.listeners.delete(listener);
@@ -80,7 +123,8 @@ class SpeechNarrationService {
   }
 
   public getVoices(): VoiceOption[] {
-    if (!this.synth) return [];
+    const synth = this.getSynth();
+    if (!synth) return [];
     if (this.voices.length === 0) {
       this.loadVoices();
     }
@@ -107,7 +151,9 @@ class SpeechNarrationService {
    * Find selected voice or default English voice
    */
   private resolveVoice(voiceURI?: string): SpeechSynthesisVoice | null {
-    if (!this.synth || this.voices.length === 0) {
+    const synth = this.getSynth();
+    if (!synth) return null;
+    if (this.voices.length === 0) {
       this.loadVoices();
     }
     if (this.voices.length === 0) return null;
@@ -145,9 +191,10 @@ class SpeechNarrationService {
     this.isSpeaking = false;
     this.currentUtterance = null;
     this.lastReportedWordIndex = -1;
-    if (this.synth) {
+    const synth = this.getSynth();
+    if (synth) {
       try {
-        this.synth.cancel();
+        synth.cancel();
       } catch (e) {
         console.debug('Speech cancel error:', e);
       }
@@ -170,19 +217,20 @@ class SpeechNarrationService {
     rate: number = 1.0, 
     volume: number = 1.0
   ): void {
-    if (!this.synth) return;
+    const synth = this.getSynth();
+    if (!synth) return;
     this.stop();
 
-    const samplePhrase = "ADHD Reader audio narration is active. Ready to focus.";
-    const utterance = new SpeechSynthesisUtterance(samplePhrase);
-    const voice = this.resolveVoice(voiceURI);
-    if (voice) utterance.voice = voice;
-    utterance.pitch = Math.max(0.5, Math.min(1.5, pitch));
-    utterance.rate = Math.max(0.5, Math.min(2.5, rate));
-    utterance.volume = Math.max(0, Math.min(1, volume));
-
     try {
-      this.synth.speak(utterance);
+      const samplePhrase = "ADHD Reader audio narration is active. Ready to focus.";
+      const utterance = new SpeechSynthesisUtterance(samplePhrase);
+      const voice = this.resolveVoice(voiceURI);
+      if (voice) utterance.voice = voice;
+      utterance.pitch = Math.max(0.5, Math.min(1.5, pitch));
+      utterance.rate = Math.max(0.5, Math.min(2.5, rate));
+      utterance.volume = Math.max(0, Math.min(1, volume));
+
+      synth.speak(utterance);
     } catch (err) {
       console.warn('Voice preview error:', err);
     }
@@ -206,7 +254,8 @@ class SpeechNarrationService {
     onFinished: FinishedCallback;
     isPlayingCheck: () => boolean;
   }): void {
-    if (!this.synth || !this.isSupported()) return;
+    const synth = this.getSynth();
+    if (!synth || !this.isSupported()) return;
     if (startIndex >= words.length) {
       onFinished();
       return;
@@ -372,11 +421,14 @@ class SpeechNarrationService {
 
     // 6. Speak the utterance
     try {
-      // Resume if browser TTS is in suspended/paused state
-      if (this.synth.paused) {
-        this.synth.resume();
+      const activeSynth = this.getSynth();
+      if (activeSynth) {
+        // Resume if browser TTS is in suspended/paused state
+        if (activeSynth.paused) {
+          activeSynth.resume();
+        }
+        activeSynth.speak(utterance);
       }
-      this.synth.speak(utterance);
     } catch (err) {
       console.warn('Speech speak call failed:', err);
     }

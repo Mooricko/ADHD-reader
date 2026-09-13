@@ -15,19 +15,23 @@ export interface CapturedPayload {
  * Detect if running inside a real Chrome Extension environment
  */
 export function isChromeExtensionEnvironment(): boolean {
-  return (
-    typeof chrome !== 'undefined' &&
-    Boolean(chrome.runtime && chrome.runtime.id) &&
-    typeof window !== 'undefined' &&
-    window.location.protocol.includes('chrome-extension')
-  );
+  try {
+    return (
+      typeof window !== 'undefined' &&
+      typeof chrome !== 'undefined' &&
+      Boolean(chrome?.runtime && chrome.runtime?.id) &&
+      Boolean(window.location?.protocol && window.location.protocol.includes('chrome-extension'))
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Capture highlighted or article text from the active browser tab
  */
 export async function captureActiveTabText(): Promise<CapturedPayload | null> {
-  if (!isChromeExtensionEnvironment() || !chrome.tabs) {
+  if (!isChromeExtensionEnvironment() || typeof chrome === 'undefined' || !chrome?.tabs) {
     return null;
   }
 
@@ -130,33 +134,49 @@ export async function getStoredCapturedText(): Promise<CapturedPayload | null> {
     }
   }
 
-  // 2. Check chrome.storage.local
-  if (typeof chrome === 'undefined' || !chrome.storage?.local) {
-    return null;
-  }
+  // 2. Check chrome.storage.local ONLY if in verified extension environment
+  try {
+    if (!isChromeExtensionEnvironment() || typeof chrome === 'undefined' || !chrome?.storage?.local) {
+      return null;
+    }
 
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['capturedText', 'capturedTitle', 'capturedUrl', 'capturedTime'], (items) => {
-      const data = items as Record<string, any>;
-      if (data && data.capturedText) {
-        resolve({
-          text: String(data.capturedText),
-          title: String(data.capturedTitle || 'Captured Webpage Text'),
-          url: String(data.capturedUrl || ''),
-          timestamp: typeof data.capturedTime === 'number' ? data.capturedTime : Date.now()
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(['capturedText', 'capturedTitle', 'capturedUrl', 'capturedTime'], (items) => {
+          if (chrome?.runtime?.lastError) {
+            resolve(null);
+            return;
+          }
+          const data = items as Record<string, any>;
+          if (data && data.capturedText) {
+            resolve({
+              text: String(data.capturedText),
+              title: String(data.capturedTitle || 'Captured Webpage Text'),
+              url: String(data.capturedUrl || ''),
+              timestamp: typeof data.capturedTime === 'number' ? data.capturedTime : Date.now()
+            });
+          } else {
+            resolve(null);
+          }
         });
-      } else {
+      } catch {
         resolve(null);
       }
     });
-  });
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Clear captured text from storage after applying
  */
 export async function clearStoredCapturedText(): Promise<void> {
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    await chrome.storage.local.remove(['capturedText', 'capturedTitle', 'capturedUrl', 'capturedTime']);
+  try {
+    if (isChromeExtensionEnvironment() && typeof chrome !== 'undefined' && chrome?.storage?.local) {
+      await chrome.storage.local.remove(['capturedText', 'capturedTitle', 'capturedUrl', 'capturedTime']);
+    }
+  } catch (err) {
+    console.warn('Could not clear stored captured text:', err);
   }
 }

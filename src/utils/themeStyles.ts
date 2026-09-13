@@ -163,3 +163,34 @@ export const FONT_CONFIGS: Record<FontFamily, {
     className: 'font-jakarta',
   },
 };
+
+/**
+ * Safe Theme Getter with fallback to 'midnight'
+ */
+export function getTheme(themeId?: string): typeof THEME_CONFIGS['midnight'] {
+  if (themeId && themeId in THEME_CONFIGS) {
+    return THEME_CONFIGS[themeId as ThemeId];
+  }
+  return THEME_CONFIGS.midnight;
+}
+
+/**
+ * Safe Highlight Color Getter with fallback to 'red'
+ */
+export function getHighlight(colorId?: string): typeof HIGHLIGHT_COLORS['red'] {
+  if (colorId && colorId in HIGHLIGHT_COLORS) {
+    return HIGHLIGHT_COLORS[colorId as HighlightColor];
+  }
+  return HIGHLIGHT_COLORS.red;
+}
+
+/**
+ * Safe Font Getter with fallback to 'lexend'
+ */
+export function getFont(fontId?: string): typeof FONT_CONFIGS['lexend'] {
+  if (fontId && fontId in FONT_CONFIGS) {
+    return FONT_CONFIGS[fontId as FontFamily];
+  }
+  return FONT_CONFIGS.lexend;
+}
+

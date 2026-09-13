@@ -12,7 +12,7 @@ import {
 } from './types';
 import { SAMPLE_TEXTS } from './data/sampleTexts';
 import { parseTextIntoWords } from './utils/textParser';
-import { THEME_CONFIGS, HIGHLIGHT_COLORS } from './utils/themeStyles';
+import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS, getTheme } from './utils/themeStyles';
 import { Header } from './components/Header';
 import { RSVPReader } from './components/RSVPReader';
 import { FlowReader } from './components/FlowReader';
@@ -20,6 +20,7 @@ import { TextInputModal } from './components/TextInputModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ExtensionHubModal } from './components/ExtensionHubModal';
+import { safeStorage } from './utils/safeStorage';
 import { 
   isChromeExtensionEnvironment, 
   getStoredCapturedText, 
@@ -60,12 +61,21 @@ const STORAGE_KEYS = {
 };
 
 export default function App() {
-  // 1. Settings state with localStorage recovery
+  // 1. Settings state with safeStorage recovery and strict sanitization
   const [settings, setSettings] = useState<ReaderSettings>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      const saved = safeStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          const merged = { ...DEFAULT_SETTINGS, ...parsed };
+          if (!THEME_CONFIGS[merged.theme as keyof typeof THEME_CONFIGS]) merged.theme = DEFAULT_SETTINGS.theme;
+          if (!HIGHLIGHT_COLORS[merged.highlightColor as keyof typeof HIGHLIGHT_COLORS]) merged.highlightColor = DEFAULT_SETTINGS.highlightColor;
+          if (!FONT_CONFIGS[merged.fontFamily as keyof typeof FONT_CONFIGS]) merged.fontFamily = DEFAULT_SETTINGS.fontFamily;
+          if (typeof merged.wpm !== 'number' || isNaN(merged.wpm) || merged.wpm < 50) merged.wpm = DEFAULT_SETTINGS.wpm;
+          if (typeof merged.fontSize !== 'number' || isNaN(merged.fontSize)) merged.fontSize = DEFAULT_SETTINGS.fontSize;
+          return merged;
+        }
       }
     } catch {
       // Ignore parse errors
@@ -76,8 +86,8 @@ export default function App() {
   // 2. Text & Document state
   const [currentText, setCurrentText] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_TEXT);
-      if (saved) return saved;
+      const saved = safeStorage.getItem(STORAGE_KEYS.CURRENT_TEXT);
+      if (saved && typeof saved === 'string' && saved.trim()) return saved;
     } catch {
       // Ignore
     }
@@ -86,8 +96,8 @@ export default function App() {
 
   const [currentTitle, setCurrentTitle] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_TITLE);
-      if (saved) return saved;
+      const saved = safeStorage.getItem(STORAGE_KEYS.CURRENT_TITLE);
+      if (saved && typeof saved === 'string' && saved.trim()) return saved;
     } catch {
       // Ignore
     }
@@ -96,8 +106,11 @@ export default function App() {
 
   const [savedDocs, setSavedDocs] = useState<SavedDocument[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SAVED_DOCS);
-      if (saved) return JSON.parse(saved);
+      const saved = safeStorage.getItem(STORAGE_KEYS.SAVED_DOCS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {
       // Ignore
     }
@@ -107,8 +120,13 @@ export default function App() {
   // 3. Playback & navigation state
   const [currentIndex, setCurrentIndex] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_INDEX);
-      if (saved) return Math.max(0, parseInt(saved, 10));
+      const saved = safeStorage.getItem(STORAGE_KEYS.CURRENT_INDEX);
+      if (saved) {
+        const parsedIdx = parseInt(saved, 10);
+        if (!isNaN(parsedIdx) && isFinite(parsedIdx)) {
+          return Math.max(0, parsedIdx);
+        }
+      }
     } catch {
       // Ignore
     }
@@ -138,7 +156,7 @@ export default function App() {
     setSettings((prev) => {
       const next = { ...prev, ...updater };
       try {
-        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(next));
+        safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(next));
       } catch {
         // Ignore
       }
@@ -149,15 +167,20 @@ export default function App() {
   const handleResetDefaults = () => {
     setSettings(DEFAULT_SETTINGS);
     try {
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+      safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
     } catch {
       // Ignore
     }
   };
 
-  // Parse words with the chosen highlight style
+  // Parse words with the chosen highlight style - guaranteed never empty
   const parsedWords = useMemo<HighlightedWordParts[]>(() => {
-    return parseTextIntoWords(currentText, settings.highlightStyle);
+    const textToParse = currentText && currentText.trim() ? currentText : SAMPLE_TEXTS[0].text;
+    const words = parseTextIntoWords(textToParse, settings.highlightStyle);
+    if (words.length === 0) {
+      return parseTextIntoWords(SAMPLE_TEXTS[0].text, settings.highlightStyle);
+    }
+    return words;
   }, [currentText, settings.highlightStyle]);
 
   // Keep index within bounds
@@ -169,16 +192,17 @@ export default function App() {
 
   // Save text changes
   const handleApplyText = useCallback((text: string, title?: string) => {
+    const validText = text && text.trim() ? text : SAMPLE_TEXTS[0].text;
     const validTitle = title || 'Custom Reading';
-    setCurrentText(text);
+    setCurrentText(validText);
     setCurrentTitle(validTitle);
     setCurrentIndex(0);
     setIsPlaying(false);
 
     try {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_TEXT, text);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_TITLE, validTitle);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, '0');
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_TEXT, validText);
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_TITLE, validTitle);
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, '0');
 
       // Update or add to saved docs
       setSavedDocs((prev) => {
@@ -186,8 +210,8 @@ export default function App() {
         const newDoc: SavedDocument = {
           id: existingIdx >= 0 ? prev[existingIdx].id : `doc-${Date.now()}`,
           title: validTitle,
-          text,
-          wordCount: text.trim().split(/\s+/).filter(Boolean).length,
+          text: validText,
+          wordCount: validText.trim().split(/\s+/).filter(Boolean).length,
           lastReadIndex: 0,
           lastReadDate: new Date().toISOString(),
         };
@@ -199,7 +223,7 @@ export default function App() {
         } else {
           updated = [newDoc, ...prev];
         }
-        localStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(updated));
+        safeStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(updated));
         return updated;
       });
     } catch {
@@ -212,13 +236,17 @@ export default function App() {
     let isMounted = true;
 
     const checkCapturedText = async (): Promise<boolean> => {
-      const stored = await getStoredCapturedText();
-      if (stored && stored.text && stored.text.trim()) {
-        if (!isMounted) return true;
-        handleApplyText(stored.text, stored.title || 'Web Selection');
-        showToast(`⚡ Loaded highlighted text from ${stored.title || 'webpage'}`);
-        await clearStoredCapturedText();
-        return true;
+      try {
+        const stored = await getStoredCapturedText();
+        if (stored && stored.text && stored.text.trim()) {
+          if (!isMounted) return true;
+          handleApplyText(stored.text, stored.title || 'Web Selection');
+          showToast(`⚡ Loaded highlighted text from ${stored.title || 'webpage'}`);
+          await clearStoredCapturedText();
+          return true;
+        }
+      } catch (err) {
+        console.warn('Error checking captured text:', err);
       }
       return false;
     };
@@ -236,25 +264,33 @@ export default function App() {
       }
     });
 
-    // Listen for real-time messages from extension background / content script
+    // Listen for real-time messages ONLY in verified Chrome Extension environment
     let messageListener: ((message: any) => void) | null = null;
-    if (typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
-      messageListener = (message: any) => {
-        if (message.action === 'NEW_CAPTURED_TEXT' && message.text) {
-          handleApplyText(message.text, message.title || 'Web Selection');
-          showToast(`⚡ Captured highlighted text: "${message.title || 'Web Selection'}"`);
-        }
-      };
+    try {
+      if (isChromeExtensionEnvironment() && typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
+        messageListener = (message: any) => {
+          if (message && message.action === 'NEW_CAPTURED_TEXT' && message.text) {
+            handleApplyText(message.text, message.title || 'Web Selection');
+            showToast(`⚡ Captured highlighted text: "${message.title || 'Web Selection'}"`);
+          }
+        };
 
-      chrome.runtime.onMessage.addListener(messageListener);
+        chrome.runtime.onMessage.addListener(messageListener);
+      }
+    } catch (err) {
+      console.warn('Could not attach extension message listener:', err);
     }
 
     return () => {
       isMounted = false;
       if (timer1) clearTimeout(timer1);
       if (timer2) clearTimeout(timer2);
-      if (messageListener && typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
-        chrome.runtime.onMessage.removeListener(messageListener);
+      try {
+        if (messageListener && isChromeExtensionEnvironment() && typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
+          chrome.runtime.onMessage.removeListener(messageListener);
+        }
+      } catch {
+        // ignore
       }
     };
   }, [handleApplyText, showToast]);
@@ -263,7 +299,7 @@ export default function App() {
     setSavedDocs((prev) => {
       const filtered = prev.filter((d) => d.id !== id);
       try {
-        localStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(filtered));
+        safeStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(filtered));
       } catch {
         // Ignore
       }
@@ -273,9 +309,10 @@ export default function App() {
 
   // Save index on change
   const handleIndexChange = useCallback((newIdx: number) => {
-    setCurrentIndex(newIdx);
+    const validIdx = Math.max(0, isNaN(newIdx) || !isFinite(newIdx) ? 0 : Math.floor(newIdx));
+    setCurrentIndex(validIdx);
     try {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, newIdx.toString());
+      safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, validIdx.toString());
     } catch {
       // Ignore
     }
@@ -386,7 +423,7 @@ export default function App() {
     handleUpdateSettings
   ]);
 
-  const currentThemeConfig = THEME_CONFIGS[settings.theme];
+  const currentThemeConfig = getTheme(settings.theme);
 
   return (
     <div 
