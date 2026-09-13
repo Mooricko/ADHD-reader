@@ -386,7 +386,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             {/* Word Display Box */}
             <div 
               id="rsvp-word-display"
-              className={`w-full flex items-baseline justify-center tracking-normal ${font.className}`}
+              className={`w-full flex items-baseline justify-center tracking-normal ${
+                currentWord.isRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : font.className
+              }`}
               style={{ 
                 fontSize: `${settings.fontSize}px`,
                 lineHeight: 1.2,
@@ -394,32 +396,47 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             >
               {settings.opticalCenterLock ? (
                 /* OPTICAL ORP CENTER LOCK: 
-                   Left wing is flex-1 right-aligned, 
-                   Middle 2 letters are centered, 
-                   Right wing is flex-1 left-aligned. 
-                   This keeps the red focal letters locked in the EXACT same coordinate! */
-                <div className="w-full flex items-baseline justify-center">
-                  <span className={`flex-1 text-right whitespace-pre ${theme.textPrimary}`}>
-                    {currentWord.prefixPunct + currentWord.beforeHighlight}
-                  </span>
-                  <span 
-                    className="shrink-0 text-center font-bold px-[0.5px] transition-colors"
-                    style={{ color: highlight.hex }}
-                  >
-                    {currentWord.highlightedText || ' '}
-                  </span>
-                  <span className={`flex-1 text-left whitespace-pre ${theme.textPrimary}`}>
-                    {currentWord.afterHighlight + currentWord.suffixPunct}
-                  </span>
-                </div>
+                   Locks focal letters to the exact center coordinate.
+                   Uses direction-aware alignment for RTL (Persian) vs LTR. */
+                currentWord.isRtl ? (
+                  <div dir="rtl" className="w-full flex items-baseline justify-center">
+                    <span className={`flex-1 text-left whitespace-pre ${theme.textPrimary}`}>
+                      {currentWord.prefixPunct + currentWord.beforeHighlight}
+                    </span>
+                    <span 
+                      className="shrink-0 text-center font-bold transition-colors"
+                      style={{ color: highlight.hex }}
+                    >
+                      {currentWord.highlightedText || ' '}
+                    </span>
+                    <span className={`flex-1 text-right whitespace-pre ${theme.textPrimary}`}>
+                      {currentWord.afterHighlight + currentWord.suffixPunct}
+                    </span>
+                  </div>
+                ) : (
+                  <div dir="ltr" className="w-full flex items-baseline justify-center">
+                    <span className={`flex-1 text-right whitespace-pre ${theme.textPrimary}`}>
+                      {currentWord.prefixPunct + currentWord.beforeHighlight}
+                    </span>
+                    <span 
+                      className="shrink-0 text-center font-bold px-[0.5px] transition-colors"
+                      style={{ color: highlight.hex }}
+                    >
+                      {currentWord.highlightedText || ' '}
+                    </span>
+                    <span className={`flex-1 text-left whitespace-pre ${theme.textPrimary}`}>
+                      {currentWord.afterHighlight + currentWord.suffixPunct}
+                    </span>
+                  </div>
+                )
               ) : (
-                /* Natural centered word */
-                <div className="inline-flex items-baseline justify-center">
+                /* Natural centered word with RTL support */
+                <div dir={currentWord.isRtl ? "rtl" : "ltr"} className="inline-flex items-baseline justify-center">
                   <span className={theme.textPrimary}>
                     {currentWord.prefixPunct + currentWord.beforeHighlight}
                   </span>
                   <span 
-                    className="font-bold px-[0.5px]"
+                    className={currentWord.isRtl ? "font-bold transition-colors" : "font-bold px-[0.5px] transition-colors"}
                     style={{ color: highlight.hex }}
                   >
                     {currentWord.highlightedText}

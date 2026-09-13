@@ -441,24 +441,64 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                         className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
                       >
                         <Play className="w-3 h-3 fill-current" />
-                        <span>{isPreviewPlaying ? 'Speaking...' : 'Test Voice'}</span>
+                        <span>{isPreviewPlaying ? 'Speaking...' : 'Test Voice (تست صدا)'}</span>
                       </button>
                     </div>
 
-                    <select
-                      id="speech-voice-select"
-                      value={settings.speechVoiceURI || ''}
-                      onChange={(e) => onUpdateSettings({ speechVoiceURI: e.target.value })}
-                      aria-label="Select Voice"
-                      className={`w-full p-2.5 rounded-xl border text-xs font-medium ${theme.borderClass} ${theme.inputBg} ${theme.textPrimary} focus:outline-none focus:border-red-500 transition-colors cursor-pointer`}
-                    >
-                      <option value="">Default System Voice (Auto-detect)</option>
-                      {availableVoices.map((v) => (
-                        <option key={v.voiceURI} value={v.voiceURI}>
-                          {v.name} ({v.lang}) — {v.provider}
-                        </option>
-                      ))}
-                    </select>
+                    {(() => {
+                      const farsiVoices = availableVoices.filter(
+                        (v) => v.isFarsi || v.lang.startsWith('fa') || v.voiceURI.startsWith('farsi-')
+                      );
+                      const otherVoices = availableVoices.filter(
+                        (v) => !v.isFarsi && !v.lang.startsWith('fa') && !v.voiceURI.startsWith('farsi-')
+                      );
+
+                      return (
+                        <select
+                          id="speech-voice-select"
+                          value={settings.speechVoiceURI || ''}
+                          onChange={(e) => onUpdateSettings({ speechVoiceURI: e.target.value })}
+                          aria-label="Select Voice"
+                          className={`w-full p-2.5 rounded-xl border text-xs font-medium ${theme.borderClass} ${theme.inputBg} ${theme.textPrimary} focus:outline-none focus:border-red-500 transition-colors cursor-pointer`}
+                        >
+                          <option value="">Default System Voice (Auto-detect Language)</option>
+                          {farsiVoices.length > 0 && (
+                            <optgroup label="🇮🇷 Farsi / Persian Voices (گویندگان فارسی)">
+                              {farsiVoices.map((v) => (
+                                <option key={v.voiceURI} value={v.voiceURI}>
+                                  {v.name} ({v.lang}) — {v.provider}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherVoices.length > 0 && (
+                            <optgroup label="🌐 English & System Voices">
+                              {otherVoices.map((v) => (
+                                <option key={v.voiceURI} value={v.voiceURI}>
+                                  {v.name} ({v.lang}) — {v.provider}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                      );
+                    })()}
+
+                    {/* Farsi Optimal Preset Quick Action */}
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateSettings({
+                          fontFamily: 'vazirmatn',
+                          speechVoiceURI: 'farsi-webspeech-cloud',
+                          speechNarration: true,
+                          highlightStyle: 'middle-two',
+                        })}
+                        className="text-[11px] font-medium text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 underline underline-offset-2"
+                      >
+                        <span>🇮🇷 بهینه‌سازی سریع برای فارسی (Apply Farsi Font & Voice)</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Voice Pitch & Volume Sliders */}

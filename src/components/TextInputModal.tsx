@@ -17,7 +17,7 @@ import {
 import { ReaderSettings, SavedDocument } from '../types';
 import { SAMPLE_TEXTS } from '../data/sampleTexts';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
-import { calculateTextStats } from '../utils/textParser';
+import { calculateTextStats, isRtlText } from '../utils/textParser';
 import { captureActiveTabText, isChromeExtensionEnvironment } from '../utils/extensionBridge';
 
 interface TextInputModalProps {
@@ -252,14 +252,30 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
                   </div>
                 </div>
 
-                <textarea
-                  id="custom-text-textarea"
-                  rows={8}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Paste any article, book chapter, meeting notes, study guide, or essay here..."
-                  className={`w-full p-4 rounded-xl border ${theme.borderClass} ${theme.inputBg} ${theme.textPrimary} text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500/50 resize-y leading-relaxed`}
-                />
+                {(() => {
+                  const isRtl = isRtlText(inputText);
+                  return (
+                    <>
+                      <textarea
+                        id="custom-text-textarea"
+                        rows={8}
+                        dir={isRtl ? 'rtl' : 'ltr'}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="متن دلخواه یا انگلیسی خود را اینجا قرار دهید / Paste any article or notes here..."
+                        className={`w-full p-4 rounded-xl border ${theme.borderClass} ${theme.inputBg} ${theme.textPrimary} text-sm ${
+                          isRtl ? 'font-vazirmatn text-right leading-loose' : 'font-mono leading-relaxed'
+                        } focus:outline-none focus:ring-2 focus:ring-red-500/50 resize-y`}
+                      />
+                      {isRtl && (
+                        <div className="flex items-center gap-2 mt-1.5 text-xs text-amber-400">
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                          <span>متن فارسی شناسایی شد • حالت راست‌به‌چپ (RTL) و برجسته‌سازی دوحرفی فعال است</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Live Text Analytics Strip */}

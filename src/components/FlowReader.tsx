@@ -203,46 +203,55 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         }}
       >
         <div className="max-w-3xl mx-auto">
-          <p className="inline">
-            {words.map((word, idx) => {
-              const isActive = idx === currentIndex;
-              const isPast = idx < currentIndex;
+          {(() => {
+            const isTextRtl = words.length > 0 && Boolean(words[0].isRtl || words.some((w) => w.isRtl));
+            return (
+              <p 
+                className={`inline ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
+                dir={isTextRtl ? 'rtl' : 'ltr'}
+              >
+                {words.map((word, idx) => {
+                  const isActive = idx === currentIndex;
+                  const isPast = idx < currentIndex;
 
-              return (
-                <React.Fragment key={idx}>
-                  <span
-                    ref={isActive ? activeWordRef : null}
-                    onClick={() => onIndexChange(idx)}
-                    title={`Word #${idx + 1}: Click to start reading here`}
-                    className={`inline-block cursor-pointer transition-all px-0.5 rounded ${
-                      isActive
-                        ? `ring-2 ring-red-500 ring-offset-2 ring-offset-black bg-red-500/15 font-semibold scale-105 shadow-xs`
-                        : isPast && isPlaying
-                        ? 'opacity-80 hover:opacity-100'
-                        : 'hover:bg-white/5'
-                    }`}
-                  >
-                    <span className={theme.textPrimary}>
-                      {word.prefixPunct + word.beforeHighlight}
-                    </span>
-                    <span 
-                      className="font-bold transition-colors"
-                      style={{ color: highlight.hex }}
-                    >
-                      {word.highlightedText}
-                    </span>
-                    <span className={theme.textPrimary}>
-                      {word.afterHighlight + word.suffixPunct}
-                    </span>
-                  </span>
-                  {' '}
-                  {word.hasParagraphBreak && (
-                    <span className="block h-6 sm:h-8" />
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </p>
+                  return (
+                    <React.Fragment key={idx}>
+                      <span
+                        ref={isActive ? activeWordRef : null}
+                        onClick={() => onIndexChange(idx)}
+                        title={`Word #${idx + 1}: Click to start reading here`}
+                        dir={word.isRtl ? 'rtl' : 'ltr'}
+                        className={`inline-block cursor-pointer transition-all px-0.5 rounded ${
+                          isActive
+                            ? `ring-2 ring-red-500 ring-offset-2 ring-offset-black bg-red-500/15 font-semibold scale-105 shadow-xs`
+                            : isPast && isPlaying
+                            ? 'opacity-80 hover:opacity-100'
+                            : 'hover:bg-white/5'
+                        }`}
+                      >
+                        <span className={theme.textPrimary}>
+                          {word.prefixPunct + word.beforeHighlight}
+                        </span>
+                        <span 
+                          className="font-bold transition-colors"
+                          style={{ color: highlight.hex }}
+                        >
+                          {word.highlightedText}
+                        </span>
+                        <span className={theme.textPrimary}>
+                          {word.afterHighlight + word.suffixPunct}
+                        </span>
+                      </span>
+                      {' '}
+                      {word.hasParagraphBreak && (
+                        <span className="block h-6 sm:h-8" />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </p>
+            );
+          })()}
         </div>
       </div>
 

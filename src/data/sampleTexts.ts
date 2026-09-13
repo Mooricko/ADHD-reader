@@ -52,5 +52,29 @@ When reading speed increases to three hundred or four hundred words per minute, 
 Light travels at approximately three hundred thousand kilometers per second. Even at this unimaginable velocity, the light from the nearest star system, Alpha Centauri, requires more than four years to reach Earth. The Andromeda galaxy is so distant that the photons hitting our telescopes began their voyage before modern humans even walked the planet.
 
 We are cosmic historians, piecing together an ancient celestial tapestry. Every atom in your body was once forged inside the fiery core of a collapsing star. We are the universe experiencing itself.`
+  },
+  {
+    id: 'sample-farsi-adhd',
+    title: 'علم خواندن سریع و تمرکز برای ذهن بیش‌فعال (ADHD)',
+    category: 'روانشناسی و تمرکز (Farsi)',
+    lastReadIndex: 0,
+    lastReadDate: new Date().toISOString(),
+    wordCount: 88,
+    text: `روش خواندن کلمه به کلمه به ذهن کمک می‌کند تا بدون پرش مداوم چشم روی خطوط، روی نقطه کانونی هر واژه تمرکز کند. در این روش، با برجسته کردن دو حرف میانی، پردازش واژگان در مغز تا سه برابر سریع‌تر و با کمترین میزان خستگی انجام می‌پذیرد.
+
+برای کسانی که با چالش کمبود توجه یا بیش‌فعالی مواجه هستند، حرکت مدام چشم بزرگ‌ترین عامل حواس‌پرتی است. حذف این مانع باعث ورود به حالت تمرکز عمیق و جریان بی‌پایان مطالعه می‌شود.
+
+سرعت نمایش واژه‌ها را مطابق ریتم دلخواه خود تنظیم کنید و از تجربه مطالعه روان و پربازده لذت ببرید.`
+  },
+  {
+    id: 'sample-farsi-ferdowsi',
+    title: 'شکوه زبان پارسی و شاهنامه فردوسی',
+    category: 'ادبیات کهن (Farsi)',
+    lastReadIndex: 0,
+    lastReadDate: new Date().toISOString(),
+    wordCount: 75,
+    text: `زبان پارسی یکی از کهن‌ترین و نغزترین زبان‌های جهان است که در درازنای سده‌ها، اندیشه و فرهنگ والای انسانی را به یادگار نهاده است. فردوسی بزرگ با سرایش شاهنامه کاخی بلند از نظم پی‌افکند که از باد و باران گزندی نیافت.
+
+بسی رنج بردم در این سال سی، عجم زنده کردم بدین پارسی. خواندن واژه‌های پارسی با روش‌های نوآورانه و هدایت صوتی هوشمند، درک زیبایی ادبی و ساختار بی‌بدیل این زبان را دوچندان می‌سازد.`
   }
 ];

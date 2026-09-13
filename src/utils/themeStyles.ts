@@ -162,6 +162,11 @@ export const FONT_CONFIGS: Record<FontFamily, {
     description: 'Crisp geometric modern sans',
     className: 'font-jakarta',
   },
+  vazirmatn: {
+    name: 'Vazirmatn (فارسی)',
+    description: 'Premier typography designed for Persian & Arabic',
+    className: 'font-vazirmatn',
+  },
 };
 
 /**

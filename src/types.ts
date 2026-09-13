@@ -4,7 +4,7 @@ export type HighlightStyle = 'middle-two' | 'middle-single' | 'bionic-prefix';
 
 export type ThemeId = 'midnight' | 'oled' | 'sepia' | 'nordic' | 'light';
 
-export type FontFamily = 'lexend' | 'atkinson' | 'jetbrains' | 'newsreader' | 'jakarta';
+export type FontFamily = 'lexend' | 'atkinson' | 'jetbrains' | 'newsreader' | 'jakarta' | 'vazirmatn';
 
 export type ReaderViewMode = 'rsvp' | 'flow';
 
@@ -15,6 +15,7 @@ export interface HighlightedWordParts {
   highlightedText: string;
   afterHighlight: string;
   suffixPunct: string;
+  isRtl?: boolean;
   hasSentenceEnd: boolean;
   hasClausePause: boolean;
   hasParagraphBreak: boolean;

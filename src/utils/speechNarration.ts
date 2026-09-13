@@ -1,5 +1,6 @@
 import { HighlightedWordParts, ReaderSettings } from '../types';
-import { calculateWordDelayMs } from './textParser';
+import { calculateWordDelayMs, isRtlText } from './textParser';
+import { persianAudioSynth } from './persianSpeechSynth';
 
 export interface VoiceOption {
   name: string;
@@ -8,6 +9,7 @@ export interface VoiceOption {
   default: boolean;
   localService: boolean;
   provider: string;
+  isFarsi?: boolean;
 }
 
 export type WordSyncCallback = (wordIndex: number) => void;
@@ -28,6 +30,7 @@ class SpeechNarrationService {
   private activeCharOffsets: { start: number; end: number; index: number }[] = [];
   private fallbackTimer: NodeJS.Timeout | null = null;
   private hasReceivedBoundary: boolean = false;
+  private synthTimer: NodeJS.Timeout | null = null;
 
   private initialized: boolean = false;
 
@@ -124,17 +127,66 @@ class SpeechNarrationService {
 
   public getVoices(): VoiceOption[] {
     const synth = this.getSynth();
-    if (!synth) return [];
-    if (this.voices.length === 0) {
+    if (synth && this.voices.length === 0) {
       this.loadVoices();
     }
 
-    return this.voices.map((v) => {
-      let provider = 'System Voice';
-      if (v.name.includes('Google') || v.voiceURI.includes('Google')) provider = 'Google Speech';
-      else if (v.name.includes('Microsoft') || v.voiceURI.includes('Microsoft')) provider = 'Microsoft Natural';
-      else if (v.name.includes('Apple') || v.name.includes('Siri') || v.voiceURI.includes('com.apple')) provider = 'Apple Voice';
-      else if (v.name.includes('Samantha') || v.name.includes('Alex') || v.name.includes('Daniel')) provider = 'Natural Voice';
+    // Curated virtual Farsi voice provider presets
+    const farsiProviderVoices: VoiceOption[] = [
+      {
+        name: 'گوینده فارسی مرورگر (Google / Web Speech fa-IR)',
+        lang: 'fa-IR',
+        voiceURI: 'farsi-webspeech-cloud',
+        default: false,
+        localService: false,
+        provider: 'Google / Web Speech API (فارسی)',
+        isFarsi: true,
+      },
+      {
+        name: 'دل‌آرا (فارسی) - Microsoft Dilara Natural',
+        lang: 'fa-IR',
+        voiceURI: 'farsi-microsoft-dilara',
+        default: false,
+        localService: false,
+        provider: 'Microsoft Natural (فارسی)',
+        isFarsi: true,
+      },
+      {
+        name: 'فرید (فارسی) - Microsoft Farid Natural',
+        lang: 'fa-IR',
+        voiceURI: 'farsi-microsoft-farid',
+        default: false,
+        localService: false,
+        provider: 'Microsoft Natural (فارسی)',
+        isFarsi: true,
+      },
+      {
+        name: 'سنتز گفتار روان فارسی (Persian Web Audio Synth)',
+        lang: 'fa-IR',
+        voiceURI: 'farsi-webaudio-synth',
+        default: false,
+        localService: true,
+        provider: 'Built-in Acoustic Audio Synth',
+        isFarsi: true,
+      },
+    ];
+
+    const mappedSystemVoices = this.voices.map((v) => {
+      const isFarsiVoice = v.lang.startsWith('fa') || 
+        v.lang.startsWith('per') || 
+        v.name.toLowerCase().includes('persian') || 
+        v.name.includes('فارسی');
+
+      let provider = isFarsiVoice ? 'Persian Natural (فارسی)' : 'System Voice';
+      if (v.name.includes('Google') || v.voiceURI.includes('Google')) {
+        provider = isFarsiVoice ? 'Google فارسی' : 'Google Speech';
+      } else if (v.name.includes('Microsoft') || v.voiceURI.includes('Microsoft')) {
+        provider = isFarsiVoice ? 'Microsoft Persian' : 'Microsoft Natural';
+      } else if (v.name.includes('Apple') || v.name.includes('Siri') || v.voiceURI.includes('com.apple')) {
+        provider = isFarsiVoice ? 'Apple فارسی' : 'Apple Voice';
+      } else if (v.name.includes('Samantha') || v.name.includes('Alex') || v.name.includes('Daniel')) {
+        provider = 'Natural Voice';
+      }
 
       return {
         name: v.name,
@@ -143,14 +195,17 @@ class SpeechNarrationService {
         default: v.default,
         localService: v.localService,
         provider,
+        isFarsi: isFarsiVoice,
       };
     });
+
+    return [...farsiProviderVoices, ...mappedSystemVoices];
   }
 
   /**
-   * Find selected voice or default English voice
+   * Find selected voice or appropriate language voice
    */
-  private resolveVoice(voiceURI?: string): SpeechSynthesisVoice | null {
+  private resolveVoice(voiceURI?: string, isFarsiText?: boolean): SpeechSynthesisVoice | null {
     const synth = this.getSynth();
     if (!synth) return null;
     if (this.voices.length === 0) {
@@ -158,9 +213,25 @@ class SpeechNarrationService {
     }
     if (this.voices.length === 0) return null;
 
-    if (voiceURI) {
+    // Handle virtual Farsi voice resolution to installed browser voices
+    if (voiceURI === 'farsi-microsoft-dilara') {
+      const match = this.voices.find(v => v.name.toLowerCase().includes('dilara') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
+      if (match) return match;
+    } else if (voiceURI === 'farsi-microsoft-farid') {
+      const match = this.voices.find(v => v.name.toLowerCase().includes('farid') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
+      if (match) return match;
+    } else if (voiceURI === 'farsi-webspeech-cloud') {
+      const match = this.voices.find(v => v.lang.startsWith('fa') || v.name.toLowerCase().includes('persian') || v.name.includes('فارسی'));
+      if (match) return match;
+    } else if (voiceURI && voiceURI !== 'farsi-webaudio-synth') {
       const match = this.voices.find((v) => v.voiceURI === voiceURI);
       if (match) return match;
+    }
+
+    // If reading Farsi text and no specific voice was locked, prioritize a Farsi voice
+    if (isFarsiText) {
+      const farsiVoice = this.voices.find(v => v.lang.startsWith('fa') || v.name.toLowerCase().includes('persian') || v.name.includes('فارسی'));
+      if (farsiVoice) return farsiVoice;
     }
 
     // Default to an English voice or system default
@@ -188,9 +259,11 @@ class SpeechNarrationService {
   public stop(): void {
     this.activeUtteranceId++;
     this.clearFallbackTimer();
+    this.clearSynthTimer();
     this.isSpeaking = false;
     this.currentUtterance = null;
     this.lastReportedWordIndex = -1;
+    persianAudioSynth.stop();
     const synth = this.getSynth();
     if (synth) {
       try {
@@ -208,6 +281,13 @@ class SpeechNarrationService {
     }
   }
 
+  private clearSynthTimer(): void {
+    if (this.synthTimer) {
+      clearTimeout(this.synthTimer);
+      this.synthTimer = null;
+    }
+  }
+
   /**
    * Speak a short audio preview of a chosen voice
    */
@@ -217,14 +297,30 @@ class SpeechNarrationService {
     rate: number = 1.0, 
     volume: number = 1.0
   ): void {
-    const synth = this.getSynth();
-    if (!synth) return;
     this.stop();
 
+    if (voiceURI === 'farsi-webaudio-synth') {
+      persianAudioSynth.preview(pitch, volume);
+      return;
+    }
+
+    const synth = this.getSynth();
+    if (!synth) return;
+
     try {
-      const samplePhrase = "ADHD Reader audio narration is active. Ready to focus.";
+      const isFarsi = voiceURI.startsWith('farsi-') || 
+        this.voices.some(v => v.voiceURI === voiceURI && (v.lang.startsWith('fa') || v.name.includes('فارسی')));
+
+      const samplePhrase = isFarsi 
+        ? "سامانه خوانش صوتی و فوکوس کلمه به کلمه آماده است."
+        : "ADHD Reader audio narration is active. Ready to focus.";
+
       const utterance = new SpeechSynthesisUtterance(samplePhrase);
-      const voice = this.resolveVoice(voiceURI);
+      if (isFarsi) {
+        utterance.lang = 'fa-IR';
+      }
+
+      const voice = this.resolveVoice(voiceURI, isFarsi);
       if (voice) utterance.voice = voice;
       utterance.pitch = Math.max(0.5, Math.min(1.5, pitch));
       utterance.rate = Math.max(0.5, Math.min(2.5, rate));
@@ -254,8 +350,6 @@ class SpeechNarrationService {
     onFinished: FinishedCallback;
     isPlayingCheck: () => boolean;
   }): void {
-    const synth = this.getSynth();
-    if (!synth || !this.isSupported()) return;
     if (startIndex >= words.length) {
       onFinished();
       return;
@@ -266,6 +360,23 @@ class SpeechNarrationService {
     this.isSpeaking = true;
     this.hasReceivedBoundary = false;
     this.lastReportedWordIndex = startIndex - 1;
+
+    // Handle Persian Web Audio Synthesizer Provider Mode
+    if (settings.speechVoiceURI === 'farsi-webaudio-synth') {
+      this.playPersianSynthWordByWord({
+        words,
+        index: startIndex,
+        settings,
+        onWordSync,
+        onFinished,
+        isPlayingCheck,
+        utteranceId,
+      });
+      return;
+    }
+
+    const synth = this.getSynth();
+    if (!synth || !this.isSupported()) return;
 
     // 1. Determine a natural chunk (up to sentence end or 25 words max)
     let endIndex = startIndex;
@@ -321,11 +432,18 @@ class SpeechNarrationService {
       return;
     }
 
+    // Check if chunk is Farsi / RTL
+    const isFarsi = isRtlText(chunkText) || (settings.speechVoiceURI && settings.speechVoiceURI.startsWith('farsi-'));
+
     // 3. Create and configure Utterance
     const utterance = new SpeechSynthesisUtterance(chunkText);
     this.currentUtterance = utterance;
 
-    const voice = this.resolveVoice(settings.speechVoiceURI);
+    if (isFarsi) {
+      utterance.lang = 'fa-IR';
+    }
+
+    const voice = this.resolveVoice(settings.speechVoiceURI, isFarsi);
     if (voice) utterance.voice = voice;
 
     utterance.pitch = Math.max(0.5, Math.min(1.5, settings.speechPitch || 1.0));
@@ -381,7 +499,6 @@ class SpeechNarrationService {
     // 5. Utterance completion: chain into the next chunk
     utterance.onend = () => {
       this.clearFallbackTimer();
-      // Guard against stale utterances, stopped state, or cancelled tasks
       if (
         this.activeUtteranceId !== utteranceId ||
         this.currentUtterance !== utterance ||
@@ -393,7 +510,6 @@ class SpeechNarrationService {
 
       const nextIndex = this.activeChunkEndIndex + 1;
       if (nextIndex < words.length) {
-        // Continue directly to next sentence chunk
         this.speakFromIndex({
           words,
           startIndex: nextIndex,
@@ -403,7 +519,6 @@ class SpeechNarrationService {
           isPlayingCheck,
         });
       } else {
-        // Reached the end of text
         this.isSpeaking = false;
         this.currentUtterance = null;
         onFinished();
@@ -413,7 +528,6 @@ class SpeechNarrationService {
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
       this.clearFallbackTimer();
       if (this.activeUtteranceId !== utteranceId) return;
-      // 'canceled' and 'interrupted' are expected when user pauses or seeks
       if (event.error !== 'canceled' && event.error !== 'interrupted') {
         console.warn('Speech synthesis error:', event.error);
       }
@@ -423,7 +537,6 @@ class SpeechNarrationService {
     try {
       const activeSynth = this.getSynth();
       if (activeSynth) {
-        // Resume if browser TTS is in suspended/paused state
         if (activeSynth.paused) {
           activeSynth.resume();
         }
@@ -446,6 +559,65 @@ class SpeechNarrationService {
   }
 
   /**
+   * Persian Web Audio Synthesizer Provider loop
+   */
+  private playPersianSynthWordByWord({
+    words,
+    index,
+    settings,
+    onWordSync,
+    onFinished,
+    isPlayingCheck,
+    utteranceId,
+  }: {
+    words: HighlightedWordParts[];
+    index: number;
+    settings: ReaderSettings;
+    onWordSync: WordSyncCallback;
+    onFinished: FinishedCallback;
+    isPlayingCheck: () => boolean;
+    utteranceId: number;
+  }): void {
+    if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
+
+    if (index >= words.length) {
+      this.isSpeaking = false;
+      onFinished();
+      return;
+    }
+
+    const currentWord = words[index];
+    onWordSync(index);
+
+    const delay = calculateWordDelayMs(
+      currentWord,
+      settings.wpm,
+      settings.smartPunctuationPause
+    );
+
+    // Synthesize Persian word acoustics
+    persianAudioSynth.speakWord(
+      currentWord.original,
+      delay,
+      settings.speechPitch,
+      settings.speechVolume
+    );
+
+    this.synthTimer = setTimeout(() => {
+      if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
+      this.playPersianSynthWordByWord({
+        words,
+        index: index + 1,
+        settings,
+        onWordSync,
+        onFinished,
+        isPlayingCheck,
+        utteranceId,
+      });
+    }, delay);
+  }
+
+  /**
    * Fallback timer that advances words if the browser/voice fails to fire onboundary events
    */
   private scheduleFallbackWordPacing({
@@ -465,48 +637,30 @@ class SpeechNarrationService {
     isPlayingCheck: () => boolean;
     utteranceId: number;
   }): void {
-    let fallbackIdx = chunkStartIndex;
+    let currentIdx = chunkStartIndex;
 
-    const step = () => {
-      // If boundary events are already firing from the browser, cancel fallback!
-      if (
-        this.hasReceivedBoundary ||
-        !this.isSpeaking ||
-        !isPlayingCheck() ||
-        this.activeUtteranceId !== utteranceId
-      ) {
+    const stepWord = () => {
+      if (this.hasReceivedBoundary || this.activeUtteranceId !== utteranceId || !isPlayingCheck()) {
         return;
       }
 
-      if (fallbackIdx <= chunkEndIndex) {
-        if (fallbackIdx > this.lastReportedWordIndex) {
-          this.lastReportedWordIndex = fallbackIdx;
-          onWordSync(fallbackIdx);
+      if (currentIdx <= chunkEndIndex) {
+        if (currentIdx > this.lastReportedWordIndex) {
+          this.lastReportedWordIndex = currentIdx;
+          onWordSync(currentIdx);
         }
-        const curWord = words[fallbackIdx];
-        fallbackIdx++;
 
-        const delay = calculateWordDelayMs(
-          curWord,
-          settings.wpm,
-          settings.smartPunctuationPause
-        );
+        const word = words[currentIdx];
+        const delay = calculateWordDelayMs(word, settings.wpm, settings.smartPunctuationPause);
+        currentIdx++;
 
-        this.fallbackTimer = setTimeout(step, delay);
+        this.fallbackTimer = setTimeout(stepWord, delay);
       }
     };
 
-    // Wait a brief 450ms window to see if onboundary fires first
-    this.fallbackTimer = setTimeout(() => {
-      if (
-        !this.hasReceivedBoundary &&
-        this.isSpeaking &&
-        isPlayingCheck() &&
-        this.activeUtteranceId === utteranceId
-      ) {
-        step();
-      }
-    }, 450);
+    const initialWord = words[chunkStartIndex];
+    const initialDelay = calculateWordDelayMs(initialWord, settings.wpm, settings.smartPunctuationPause);
+    this.fallbackTimer = setTimeout(stepWord, initialDelay);
   }
 }
 
