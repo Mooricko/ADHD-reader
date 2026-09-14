@@ -45,6 +45,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   showReticleGuides: true,
   showContextWords: false,
   opticalCenterLock: true,
+  morphTransition: true,
   speechNarration: false,
   speechVoiceURI: '',
   speechPitch: 1.0,

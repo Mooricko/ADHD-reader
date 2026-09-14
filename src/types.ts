@@ -39,6 +39,7 @@ export interface ReaderSettings {
   showReticleGuides: boolean;
   showContextWords: boolean; // faint preview of previous and next word
   opticalCenterLock: boolean; // lock middle letters to exact center anchor
+  morphTransition: boolean; // SVG threshold text morph transition between RSVP words
   speechNarration: boolean; // Web Speech API voice-over narration toggle
   speechVoiceURI: string; // Voice URI or empty string for default
   speechPitch: number; // 0.5 to 1.5 (default 1.0)

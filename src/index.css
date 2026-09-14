@@ -65,3 +65,24 @@
   border-radius: 2px;
 }
 
+/* Gentle, comfortable CSS fade-in animation for standard RSVP word display */
+@keyframes rsvpComfortFadeIn {
+  0% {
+    opacity: 0.32;
+    filter: blur(1.2px);
+    transform: translateY(0.5px) var(--rsvp-offset, translateX(0));
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) var(--rsvp-offset, translateX(0));
+  }
+}
+
+.animate-rsvp-fade-in {
+  animation-name: rsvpComfortFadeIn;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: forwards;
+}
+
+

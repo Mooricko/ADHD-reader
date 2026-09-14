@@ -314,6 +314,25 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               />
             </div>
 
+            {/* Liquid Text Morph Transition */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
+              <div>
+                <div className={`text-xs font-semibold ${theme.textPrimary}`}>
+                  Liquid Text Morph Transition
+                </div>
+                <div className={`text-[11px] ${theme.textMuted}`}>
+                  SVG threshold cross-blur animation between RSVP words
+                </div>
+              </div>
+              <input
+                id="toggle-morph-transition"
+                type="checkbox"
+                checked={settings.morphTransition}
+                onChange={(e) => onUpdateSettings({ morphTransition: e.target.checked })}
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
+              />
+            </div>
+
             {/* Reticle Guides */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
               <div>

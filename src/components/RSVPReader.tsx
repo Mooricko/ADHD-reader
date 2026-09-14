@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { 
   Play, 
   Pause, 
@@ -15,7 +15,8 @@ import {
   Crosshair,
   Volume2,
   VolumeX,
-  Headphones
+  Headphones,
+  Sparkles
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { HighlightedWordParts, ReaderSettings } from '../types';
@@ -24,6 +25,7 @@ import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
+import { RSVPMorphWord } from './RSVPMorphWord';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -253,10 +255,6 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     }
   };
 
-  const wordContainerRef = useRef<HTMLDivElement>(null);
-  const highlightSpanRef = useRef<HTMLSpanElement>(null);
-  const [orpOffset, setOrpOffset] = useState<number>(0);
-
   const currentWord = words[currentIndex] || {
     original: '',
     prefixPunct: '',
@@ -269,31 +267,6 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     hasParagraphBreak: false,
     index: 0,
   };
-
-  // Compute optical center lock offset to align the focal highlight with the reticle center marker
-  useLayoutEffect(() => {
-    if (!settings.opticalCenterLock || !wordContainerRef.current || !highlightSpanRef.current) {
-      setOrpOffset(0);
-      return;
-    }
-
-    const wordEl = wordContainerRef.current;
-    const hlEl = highlightSpanRef.current;
-
-    const wordCenter = wordEl.offsetWidth / 2;
-    const hlCenter = hlEl.offsetLeft + hlEl.offsetWidth / 2;
-    const targetOffset = wordCenter - hlCenter;
-
-    setOrpOffset(targetOffset);
-  }, [
-    currentIndex,
-    settings.opticalCenterLock,
-    settings.fontSize,
-    currentWord.original,
-    currentWord.beforeHighlight,
-    currentWord.highlightedText,
-    currentWord.afterHighlight,
-  ]);
 
   const prevWord = currentIndex > 0 ? words[currentIndex - 1] : null;
   const nextWord = currentIndex < words.length - 1 ? words[currentIndex + 1] : null;
@@ -320,8 +293,37 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           </span>
         </div>
 
-        {/* Current Speed Indicator Badge */}
-        <div className="flex items-center gap-1.5">
+        {/* Morph Transition Toggle & Speed Indicator Badge */}
+        <div className="flex items-center gap-2">
+          <button
+            id="toggle-morph-transition-btn"
+            type="button"
+            onClick={() => onUpdateSettings({ morphTransition: !settings.morphTransition })}
+            title={
+              settings.morphTransition
+                ? 'Liquid Text Morph Transition: ON (Click to toggle)'
+                : 'Liquid Text Morph Transition: OFF (Click to toggle)'
+            }
+            aria-label="Toggle Liquid Morph Transition"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono transition-all ${
+              settings.morphTransition
+                ? 'font-bold shadow-xs'
+                : `${theme.borderClass} ${theme.textMuted} opacity-70 hover:opacity-100`
+            }`}
+            style={
+              settings.morphTransition
+                ? {
+                    borderColor: `${highlight.hex}60`,
+                    color: highlight.hex,
+                    backgroundColor: `${highlight.hex}18`,
+                  }
+                : undefined
+            }
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Morph</span>
+          </button>
+
           <span className={`text-xs font-mono font-semibold px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textPrimary}`}>
             <span style={{ color: highlight.hex }}>{settings.wpm}</span> <span className={theme.textMuted}>WPM</span>
           </span>
@@ -396,42 +398,16 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               </div>
             )}
 
-            {/* Word Display Box */}
-            <div 
-              id="rsvp-word-display"
-              className={`w-full flex items-baseline justify-center tracking-normal relative overflow-visible ${
-                currentWord.isRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : font.className
-              }`}
-              style={{ 
-                fontSize: `${settings.fontSize}px`,
-                lineHeight: 1.2,
-              }}
-            >
-              {/* Seamless Contiguous Word Block (Preserves cursive Persian/Arabic ligatures & LTR layout) */}
-              <div
-                ref={wordContainerRef}
-                dir={currentWord.isRtl ? 'rtl' : 'ltr'}
-                className="inline-flex items-baseline justify-center whitespace-nowrap will-change-transform"
-                style={{
-                  transform: settings.opticalCenterLock && orpOffset !== 0 ? `translateX(${orpOffset}px)` : undefined,
-                  transition: isPlaying ? 'none' : 'transform 75ms ease-out',
-                }}
-              >
-                <span className={theme.textPrimary}>
-                  {currentWord.prefixPunct + currentWord.beforeHighlight}
-                </span>
-                <span 
-                  ref={highlightSpanRef}
-                  className={currentWord.isRtl ? "font-bold transition-colors" : "font-bold px-[0.5px] transition-colors"}
-                  style={{ color: highlight.hex }}
-                >
-                  {currentWord.highlightedText}
-                </span>
-                <span className={theme.textPrimary}>
-                  {currentWord.afterHighlight + currentWord.suffixPunct}
-                </span>
-              </div>
-            </div>
+            {/* Word Display Box with Liquid Text Morph Transition */}
+            <RSVPMorphWord
+              currentWord={currentWord}
+              currentIndex={currentIndex}
+              isPlaying={isPlaying}
+              settings={settings}
+              theme={theme}
+              highlight={highlight}
+              font={font}
+            />
           </div>
         )}
 
