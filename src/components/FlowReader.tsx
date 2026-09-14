@@ -18,6 +18,7 @@ import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
+import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -284,26 +285,15 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             </span>
           </div>
 
-          {/* Play/Pause */}
-          <button
+          {/* Play/Pause (Proud Squid 15 UI) */}
+          <ProudSquidPlayButton
             id="flow-play-pause-btn"
-            type="button"
-            onClick={onTogglePlay}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white shadow-md transition-transform active:scale-95 text-sm"
-            style={{ backgroundColor: highlight.hex }}
-          >
-            {isPlaying ? (
-              <>
-                <Pause className="w-4 h-4 fill-current" />
-                <span>Pause Tracker</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current ml-0.5" />
-                <span>Auto-Track Reading</span>
-              </>
-            )}
-          </button>
+            isPlaying={isPlaying}
+            onToggle={onTogglePlay}
+            accentColor={highlight.hex}
+            title={isPlaying ? 'Pause Tracker (Space)' : 'Auto-Track Reading (Space)'}
+          />
+
 
           {/* Audio Controls (Metronome + Voice-Over Narration) */}
           <div className="flex items-center gap-2">

@@ -26,6 +26,7 @@ import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { RSVPMorphWord } from './RSVPMorphWord';
+import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -497,33 +498,18 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             </button>
           </div>
 
-          {/* Master Play / Pause Button */}
-          <button
+          {/* Master Play / Pause Button (Proud Squid 15 UI) */}
+          <ProudSquidPlayButton
             id="rsvp-play-pause-btn"
-            type="button"
-            onClick={() => {
+            isPlaying={isPlaying}
+            onToggle={() => {
               setHasFinished(false);
               onTogglePlay();
             }}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-bold text-white shadow-md transition-transform active:scale-95 text-base"
-            style={{ backgroundColor: highlight.hex }}
-          >
-            {isPlaying ? (
-              <>
-                <Pause className="w-5 h-5 fill-current" />
-                <span>Pause</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-5 h-5 fill-current ml-0.5" />
-                <span>{currentIndex >= words.length - 1 ? 'Read Again' : 'Play'}</span>
-              </>
-            )}
-            <span className="hidden sm:inline-block text-[11px] font-normal opacity-80 border-l border-white/30 pl-2 ml-1">
-              Space
-            </span>
-          </button>
+            accentColor={highlight.hex}
+            title={isPlaying ? 'Pause reading (Space)' : (currentIndex >= words.length - 1 ? 'Read Again (Space)' : 'Play reading (Space)')}
+          />
+
 
           {/* Forward & Audio Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
