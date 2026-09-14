@@ -1,6 +1,6 @@
 import { FontFamily, HighlightColor, ThemeId } from '../types';
 
-export const THEME_CONFIGS: Record<ThemeId, {
+export type ThemeConfig = {
   name: string;
   bgClass: string;
   cardBgClass: string;
@@ -11,7 +11,9 @@ export const THEME_CONFIGS: Record<ThemeId, {
   inputBg: string;
   sliderTrack: string;
   hexBg: string;
-}> = {
+};
+
+export const THEME_CONFIGS: Record<ThemeId, ThemeConfig> = {
   midnight: {
     name: 'Midnight Dark',
     bgClass: 'bg-[#0b0f17]',

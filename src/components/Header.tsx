@@ -5,15 +5,12 @@ import {
   FileText, 
   Maximize2, 
   Minimize2, 
-  Volume2, 
-  VolumeX, 
   Sparkles, 
   HelpCircle,
   Eye,
   AlignLeft,
   Puzzle,
-  Zap,
-  Headphones
+  Zap
 } from 'lucide-react';
 import { ReaderSettings, ReaderViewMode } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
@@ -110,38 +107,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Audio Metronome Quick Toggle */}
-          <button
-            id="metronome-toggle-btn"
-            type="button"
-            onClick={() => onUpdateSettings({ metronomeSound: !settings.metronomeSound })}
-            title={settings.metronomeSound ? 'Metronome sound enabled (Click to mute)' : 'Enable rhythmic focus metronome (S)'}
-            aria-label="Toggle Metronome"
-            className={`p-2 rounded-lg border transition-colors ${
-              settings.metronomeSound 
-                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' 
-                : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary}`
-            }`}
-          >
-            {settings.metronomeSound ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          </button>
-
-          {/* Web Speech Voice-Over Narration Quick Toggle */}
-          <button
-            id="header-voice-narration-toggle"
-            type="button"
-            onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
-            title={settings.speechNarration ? 'Voice-Over Narration is ACTIVE (Click to mute, or press V)' : 'Enable synchronized Voice-Over narration (Web Speech API, or press V)'}
-            aria-label="Toggle Voice-Over Narration"
-            className={`p-2 rounded-lg border transition-all ${
-              settings.speechNarration
-                ? 'bg-red-500/15 text-red-400 border-red-500/30 shadow-xs ring-1 ring-red-500/30'
-                : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary}`
-            }`}
-          >
-            <Headphones className="w-4 h-4" />
-          </button>
-
           {/* Chrome Extension & Webpage Capture Hub */}
           <button
             id="open-extension-hub-btn"

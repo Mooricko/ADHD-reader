@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { 
   Play, 
   Pause, 
@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Crosshair,
   Volume2,
+  VolumeX,
   Headphones
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -22,6 +23,7 @@ import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeSty
 import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
+import { SpeedSliderToggle } from './SpeedSliderToggle';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -251,9 +253,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     }
   };
 
-  const handleSpeedPreset = (speed: number) => {
-    onUpdateSettings({ wpm: speed });
-  };
+  const wordContainerRef = useRef<HTMLDivElement>(null);
+  const highlightSpanRef = useRef<HTMLSpanElement>(null);
+  const [orpOffset, setOrpOffset] = useState<number>(0);
 
   const currentWord = words[currentIndex] || {
     original: '',
@@ -267,6 +269,31 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     hasParagraphBreak: false,
     index: 0,
   };
+
+  // Compute optical center lock offset to align the focal highlight with the reticle center marker
+  useLayoutEffect(() => {
+    if (!settings.opticalCenterLock || !wordContainerRef.current || !highlightSpanRef.current) {
+      setOrpOffset(0);
+      return;
+    }
+
+    const wordEl = wordContainerRef.current;
+    const hlEl = highlightSpanRef.current;
+
+    const wordCenter = wordEl.offsetWidth / 2;
+    const hlCenter = hlEl.offsetLeft + hlEl.offsetWidth / 2;
+    const targetOffset = wordCenter - hlCenter;
+
+    setOrpOffset(targetOffset);
+  }, [
+    currentIndex,
+    settings.opticalCenterLock,
+    settings.fontSize,
+    currentWord.original,
+    currentWord.beforeHighlight,
+    currentWord.highlightedText,
+    currentWord.afterHighlight,
+  ]);
 
   const prevWord = currentIndex > 0 ? words[currentIndex - 1] : null;
   const nextWord = currentIndex < words.length - 1 ? words[currentIndex + 1] : null;
@@ -293,24 +320,10 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           </span>
         </div>
 
-        {/* Speed Quick Adjust & Presets */}
+        {/* Current Speed Indicator Badge */}
         <div className="flex items-center gap-1.5">
-          {[200, 300, 450, 600].map((presetWpm) => (
-            <button
-              key={presetWpm}
-              type="button"
-              onClick={() => handleSpeedPreset(presetWpm)}
-              className={`px-2 py-0.5 rounded text-xs font-mono transition-all ${
-                settings.wpm === presetWpm
-                  ? `${highlight.bgBadge} border font-bold shadow-xs`
-                  : `border ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary}`
-              }`}
-            >
-              {presetWpm}
-            </button>
-          ))}
-          <span className={`text-xs font-mono font-semibold ml-1 ${theme.textPrimary}`}>
-            {settings.wpm} <span className={theme.textMuted}>WPM</span>
+          <span className={`text-xs font-mono font-semibold px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textPrimary}`}>
+            <span style={{ color: highlight.hex }}>{settings.wpm}</span> <span className={theme.textMuted}>WPM</span>
           </span>
         </div>
       </div>
@@ -386,7 +399,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             {/* Word Display Box */}
             <div 
               id="rsvp-word-display"
-              className={`w-full flex items-baseline justify-center tracking-normal ${
+              className={`w-full flex items-baseline justify-center tracking-normal relative overflow-visible ${
                 currentWord.isRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : font.className
               }`}
               style={{ 
@@ -394,58 +407,30 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
                 lineHeight: 1.2,
               }}
             >
-              {settings.opticalCenterLock ? (
-                /* OPTICAL ORP CENTER LOCK: 
-                   Locks focal letters to the exact center coordinate.
-                   Uses direction-aware alignment for RTL (Persian) vs LTR. */
-                currentWord.isRtl ? (
-                  <div dir="rtl" className="w-full flex items-baseline justify-center">
-                    <span className={`flex-1 text-left whitespace-pre ${theme.textPrimary}`}>
-                      {currentWord.prefixPunct + currentWord.beforeHighlight}
-                    </span>
-                    <span 
-                      className="shrink-0 text-center font-bold transition-colors"
-                      style={{ color: highlight.hex }}
-                    >
-                      {currentWord.highlightedText || ' '}
-                    </span>
-                    <span className={`flex-1 text-right whitespace-pre ${theme.textPrimary}`}>
-                      {currentWord.afterHighlight + currentWord.suffixPunct}
-                    </span>
-                  </div>
-                ) : (
-                  <div dir="ltr" className="w-full flex items-baseline justify-center">
-                    <span className={`flex-1 text-right whitespace-pre ${theme.textPrimary}`}>
-                      {currentWord.prefixPunct + currentWord.beforeHighlight}
-                    </span>
-                    <span 
-                      className="shrink-0 text-center font-bold px-[0.5px] transition-colors"
-                      style={{ color: highlight.hex }}
-                    >
-                      {currentWord.highlightedText || ' '}
-                    </span>
-                    <span className={`flex-1 text-left whitespace-pre ${theme.textPrimary}`}>
-                      {currentWord.afterHighlight + currentWord.suffixPunct}
-                    </span>
-                  </div>
-                )
-              ) : (
-                /* Natural centered word with RTL support */
-                <div dir={currentWord.isRtl ? "rtl" : "ltr"} className="inline-flex items-baseline justify-center">
-                  <span className={theme.textPrimary}>
-                    {currentWord.prefixPunct + currentWord.beforeHighlight}
-                  </span>
-                  <span 
-                    className={currentWord.isRtl ? "font-bold transition-colors" : "font-bold px-[0.5px] transition-colors"}
-                    style={{ color: highlight.hex }}
-                  >
-                    {currentWord.highlightedText}
-                  </span>
-                  <span className={theme.textPrimary}>
-                    {currentWord.afterHighlight + currentWord.suffixPunct}
-                  </span>
-                </div>
-              )}
+              {/* Seamless Contiguous Word Block (Preserves cursive Persian/Arabic ligatures & LTR layout) */}
+              <div
+                ref={wordContainerRef}
+                dir={currentWord.isRtl ? 'rtl' : 'ltr'}
+                className="inline-flex items-baseline justify-center whitespace-nowrap will-change-transform"
+                style={{
+                  transform: settings.opticalCenterLock && orpOffset !== 0 ? `translateX(${orpOffset}px)` : undefined,
+                  transition: isPlaying ? 'none' : 'transform 75ms ease-out',
+                }}
+              >
+                <span className={theme.textPrimary}>
+                  {currentWord.prefixPunct + currentWord.beforeHighlight}
+                </span>
+                <span 
+                  ref={highlightSpanRef}
+                  className={currentWord.isRtl ? "font-bold transition-colors" : "font-bold px-[0.5px] transition-colors"}
+                  style={{ color: highlight.hex }}
+                >
+                  {currentWord.highlightedText}
+                </span>
+                <span className={theme.textPrimary}>
+                  {currentWord.afterHighlight + currentWord.suffixPunct}
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -564,13 +549,13 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             </span>
           </button>
 
-          {/* Forward & Speed Controls */}
+          {/* Forward & Audio Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               id="rsvp-next-word-btn"
               type="button"
               onClick={() => handleJump(1)}
-              title="Next Word"
+              title="Next Word (Right Arrow)"
               aria-label="Next Word"
               className={`p-2.5 rounded-xl border ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
             >
@@ -581,7 +566,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               id="rsvp-forward-10-btn"
               type="button"
               onClick={() => handleJump(10)}
-              title="Forward 10 words (Right Arrow)"
+              title="Forward 10 words"
               aria-label="Forward 10 words"
               className={`flex items-center gap-1 px-3 py-2 rounded-xl border ${theme.borderClass} ${theme.textPrimary} hover:${theme.accentSurface} text-xs font-semibold transition-colors`}
             >
@@ -589,49 +574,48 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               <FastForward className="w-3.5 h-3.5" />
             </button>
 
-            {/* WPM Speed Decrement / Increment */}
-            <div className={`flex items-center rounded-xl border ${theme.borderClass} p-0.5`}>
-              <button
-                id="wpm-decrease-btn"
-                type="button"
-                onClick={() => onUpdateSettings({ wpm: Math.max(60, settings.wpm - 25) })}
-                title="Decrease speed by 25 WPM (Down Arrow)"
-                aria-label="Decrease Speed"
-                className={`px-2 py-1.5 rounded-lg text-xs font-bold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
-              >
-                -
-              </button>
-              <span className={`px-2 text-xs font-mono font-bold ${theme.textPrimary}`}>
-                {settings.wpm}
-              </span>
-              <button
-                id="wpm-increase-btn"
-                type="button"
-                onClick={() => onUpdateSettings({ wpm: Math.min(1000, settings.wpm + 25) })}
-                title="Increase speed by 25 WPM (Up Arrow)"
-                aria-label="Increase Speed"
-                className={`px-2 py-1.5 rounded-lg text-xs font-bold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
-              >
-                +
-              </button>
-            </div>
-
-            {/* Quick Voice-Over Narration Toggle */}
+            {/* Audio Metronome Toggle */}
             <button
-              id="rsvp-quick-voice-toggle"
+              id="rsvp-metronome-toggle"
+              type="button"
+              onClick={() => onUpdateSettings({ metronomeSound: !settings.metronomeSound })}
+              title={settings.metronomeSound ? 'Metronome sound enabled (Click to mute)' : 'Enable rhythmic focus metronome (S)'}
+              aria-label="Toggle Metronome"
+              className={`p-2.5 rounded-xl border transition-all ${
+                settings.metronomeSound
+                  ? 'border-amber-500 bg-amber-500/15 text-amber-400 font-bold shadow-xs'
+                  : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+              }`}
+            >
+              {settings.metronomeSound ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            {/* Voice-Over Narration Toggle */}
+            <button
+              id="rsvp-voice-narration-toggle"
               type="button"
               onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
-              title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Narration (Reads words aloud)'}
+              title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Audio Narration (V)'}
               aria-label="Toggle Voice-Over Narration"
               className={`p-2.5 rounded-xl border transition-all ${
                 settings.speechNarration
-                  ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs'
+                  ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs ring-1 ring-red-500/30'
                   : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
               }`}
             >
               <Headphones className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Speed Slider Toggle (Merged Speed Controller matching reference design) */}
+        <div className={`mt-3 pt-3 border-t ${theme.borderClass}`}>
+          <SpeedSliderToggle
+            wpm={settings.wpm}
+            onWpmChange={(wpm) => onUpdateSettings({ wpm })}
+            highlightHex={highlight.hex}
+            theme={theme}
+          />
         </div>
       </div>
     </div>

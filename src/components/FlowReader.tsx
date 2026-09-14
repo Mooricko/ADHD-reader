@@ -8,12 +8,16 @@ import {
   Eye, 
   CheckCircle2, 
   Clock,
-  Headphones
+  Headphones,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { HighlightedWordParts, ReaderSettings } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
+import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
+import { SpeedSliderToggle } from './SpeedSliderToggle';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -112,6 +116,12 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       onIndexChangeRef.current(nextIdx);
 
       const currentWord = allWords[nextIdx];
+      
+      // Audio metronome tick synchronization
+      if (settingsRef.current.metronomeSound) {
+        metronome.playTick(settingsRef.current.metronomeVolume, currentWord?.hasSentenceEnd);
+      }
+
       const delay = calculateWordDelayMs(
         currentWord,
         settingsRef.current.wpm,
@@ -256,82 +266,89 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       </div>
 
       {/* Bottom Sticky Control Strip */}
-      <div className={`mt-4 rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 shadow-lg flex flex-wrap items-center justify-between gap-3`}>
-        <div className="flex items-center gap-2">
-          <button
-            id="flow-restart-btn"
-            type="button"
-            onClick={onRestart}
-            title="Restart from beginning"
-            aria-label="Restart"
-            className={`p-2 rounded-xl border ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} transition-colors`}
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <span className={`text-xs font-mono ${theme.textMuted}`}>
-            {progressPercent}% completed
-          </span>
-        </div>
-
-        {/* Play/Pause */}
-        <button
-          id="flow-play-pause-btn"
-          type="button"
-          onClick={onTogglePlay}
-          className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white shadow-md transition-transform active:scale-95 text-sm"
-          style={{ backgroundColor: highlight.hex }}
-        >
-          {isPlaying ? (
-            <>
-              <Pause className="w-4 h-4 fill-current" />
-              <span>Pause Tracker</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-current ml-0.5" />
-              <span>Auto-Track Reading</span>
-            </>
-          )}
-        </button>
-
-        {/* Speed Adjustment */}
-        <div className="flex items-center gap-2">
-          <span className={`text-xs font-mono ${theme.textMuted}`}>Speed:</span>
-          <div className={`flex items-center rounded-xl border ${theme.borderClass} p-0.5`}>
+      <div className={`mt-4 rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 shadow-lg flex flex-col gap-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
             <button
+              id="flow-restart-btn"
               type="button"
-              onClick={() => onUpdateSettings({ wpm: Math.max(60, settings.wpm - 25) })}
-              className={`px-2 py-1 rounded text-xs font-bold ${theme.textMuted} hover:${theme.textPrimary}`}
+              onClick={onRestart}
+              title="Restart from beginning"
+              aria-label="Restart"
+              className={`p-2.5 rounded-xl border ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
             >
-              -
+              <RotateCcw className="w-4 h-4" />
             </button>
-            <span className={`px-2 text-xs font-mono font-bold ${theme.textPrimary}`}>
-              {settings.wpm}
+            <span className={`text-xs font-mono ${theme.textMuted}`}>
+              {progressPercent}% completed
             </span>
-            <button
-              type="button"
-              onClick={() => onUpdateSettings({ wpm: Math.min(1000, settings.wpm + 25) })}
-              className={`px-2 py-1 rounded text-xs font-bold ${theme.textMuted} hover:${theme.textPrimary}`}
-            >
-              +
-            </button>
           </div>
 
-          {/* Quick Voice-Over Narration Toggle */}
+          {/* Play/Pause */}
           <button
-            id="flow-voice-toggle-btn"
+            id="flow-play-pause-btn"
             type="button"
-            onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
-            title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Audio Narration'}
-            aria-label="Toggle Voice-Over Narration"
-            className={`p-2 rounded-xl border transition-all ${
-              settings.speechNarration
-                ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs'
-                : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary}`
-            }`}
+            onClick={onTogglePlay}
+            className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white shadow-md transition-transform active:scale-95 text-sm"
+            style={{ backgroundColor: highlight.hex }}
           >
-            <Headphones className="w-4 h-4" />
+            {isPlaying ? (
+              <>
+                <Pause className="w-4 h-4 fill-current" />
+                <span>Pause Tracker</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current ml-0.5" />
+                <span>Auto-Track Reading</span>
+              </>
+            )}
           </button>
+
+          {/* Audio Controls (Metronome + Voice-Over Narration) */}
+          <div className="flex items-center gap-2">
+            {/* Audio Metronome Toggle */}
+            <button
+              id="flow-metronome-toggle-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ metronomeSound: !settings.metronomeSound })}
+              title={settings.metronomeSound ? 'Metronome sound enabled (Click to mute)' : 'Enable rhythmic focus metronome'}
+              aria-label="Toggle Metronome"
+              className={`p-2.5 rounded-xl border transition-all ${
+                settings.metronomeSound
+                  ? 'border-amber-500 bg-amber-500/15 text-amber-400 font-bold shadow-xs'
+                  : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+              }`}
+            >
+              {settings.metronomeSound ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            {/* Quick Voice-Over Narration Toggle */}
+            <button
+              id="flow-voice-toggle-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ speechNarration: !settings.speechNarration })}
+              title={settings.speechNarration ? 'Voice-Over Narration is ON (Click to turn off)' : 'Enable Voice-Over Audio Narration'}
+              aria-label="Toggle Voice-Over Narration"
+              className={`p-2.5 rounded-xl border transition-all ${
+                settings.speechNarration
+                  ? 'border-red-500 bg-red-500/15 text-red-400 font-bold shadow-xs ring-1 ring-red-500/30'
+                  : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+              }`}
+            >
+              <Headphones className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Merged Speed Slider Toggle */}
+        <div className={`pt-3 border-t ${theme.borderClass}`}>
+          <SpeedSliderToggle
+            wpm={settings.wpm}
+            onWpmChange={(wpm) => onUpdateSettings({ wpm })}
+            highlightHex={highlight.hex}
+            theme={theme}
+          />
         </div>
       </div>
     </div>
