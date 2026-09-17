@@ -16,6 +16,7 @@ import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 import { MarkerHighlight } from './MarkerHighlight';
+import { LayoutGroup } from 'motion/react';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -347,81 +348,86 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         />
 
         {/* Flow Content Rendered by Paragraphs */}
-        <div 
-          className={`max-w-3xl mx-auto relative z-10 ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
-          dir={isTextRtl ? 'rtl' : 'ltr'}
-        >
-          {paragraphGroups.map((group, groupIdx) => {
-            // Determine if this paragraph is unblurred (Item 3)
-            const isParagraphUnblurred =
-              !settings.focusParagraphBlur ||
-              group.paragraphIndex === hoveredParagraphIndex ||
-              (hoveredParagraphIndex === null && group.paragraphIndex === activeParagraphIndex);
+        <LayoutGroup id="flow-reader-marker">
+          <div 
+            className={`max-w-3xl mx-auto relative z-10 ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
+            dir={isTextRtl ? 'rtl' : 'ltr'}
+            onMouseLeave={() => {
+              setHoveredWordIndex(null);
+              setHoveredParagraphIndex(null);
+            }}
+          >
+            {paragraphGroups.map((group, groupIdx) => {
+              // Determine if this paragraph is unblurred (Item 3)
+              const isParagraphUnblurred =
+                !settings.focusParagraphBlur ||
+                group.paragraphIndex === hoveredParagraphIndex ||
+                (hoveredParagraphIndex === null && group.paragraphIndex === activeParagraphIndex);
 
-            return (
-              <div
-                key={`para-${group.paragraphIndex}-${groupIdx}`}
-                ref={(el) => {
-                  paragraphRefs.current[group.paragraphIndex] = el;
-                }}
-                onMouseEnter={() => setHoveredParagraphIndex(group.paragraphIndex)}
-                className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed ${
-                  isParagraphUnblurred
-                    ? 'opacity-100 blur-0'
-                    : 'opacity-25 blur-[5px] select-none pointer-events-auto'
-                }`}
-              >
-                {group.words.map((item) => {
-                  const isTarget = item.globalIndex === targetWordIndex;
-                  const isAudioCurrent = item.globalIndex === currentIndex;
-                  const isPast = item.globalIndex < currentIndex;
+              return (
+                <div
+                  key={`para-${group.paragraphIndex}-${groupIdx}`}
+                  ref={(el) => {
+                    paragraphRefs.current[group.paragraphIndex] = el;
+                  }}
+                  onMouseEnter={() => setHoveredParagraphIndex(group.paragraphIndex)}
+                  className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed ${
+                    isParagraphUnblurred
+                      ? 'opacity-100 blur-0'
+                      : 'opacity-25 blur-[5px] select-none pointer-events-auto'
+                  }`}
+                >
+                  {group.words.map((item) => {
+                    const isTarget = item.globalIndex === targetWordIndex;
+                    const isAudioCurrent = item.globalIndex === currentIndex;
+                    const isPast = item.globalIndex < currentIndex;
 
-                  if (isTarget) {
+                    if (isTarget) {
+                      return (
+                        <span
+                          key={`w-${item.globalIndex}`}
+                          ref={isAudioCurrent ? activeWordRef : null}
+                          onClick={() => onIndexChange(item.globalIndex)}
+                          onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
+                          title={`Word #${item.globalIndex + 1}: Click to start reading here`}
+                          dir={item.word.isRtl ? 'rtl' : 'ltr'}
+                          className="inline-block cursor-pointer align-baseline mx-[1px]"
+                        >
+                          {/* Marker Highlight Floating Pill (Gradient Oval with Smooth Animated Transition) */}
+                          <MarkerHighlight
+                            highlight={item.word.original}
+                            markerColor={highlight.hex}
+                            isRtl={Boolean(item.word.isRtl)}
+                            isActive={true}
+                            className="font-bold"
+                          />
+                        </span>
+                      );
+                    }
+
                     return (
                       <span
-                        key={`w-target-${item.globalIndex}`}
+                        key={`w-${item.globalIndex}`}
                         ref={isAudioCurrent ? activeWordRef : null}
                         onClick={() => onIndexChange(item.globalIndex)}
                         onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
                         title={`Word #${item.globalIndex + 1}: Click to start reading here`}
                         dir={item.word.isRtl ? 'rtl' : 'ltr'}
-                        className="inline-block cursor-pointer align-baseline mx-[1px]"
+                        className={`inline-block cursor-pointer px-1 py-0.5 rounded transition-all align-baseline ${
+                          isPast && isPlaying
+                            ? 'opacity-70 hover:opacity-100'
+                            : `${theme.textPrimary} hover:text-white hover:bg-white/5`
+                        }`}
                       >
-                        {/* Marker Highlight Pillow (Clean, non-bouncy focus) */}
-                        <MarkerHighlight
-                          highlight={item.word.original}
-                          markerColor={highlight.hex}
-                          highlightedTextColor="#0f172a"
-                          isRtl={Boolean(item.word.isRtl)}
-                          isActive={true}
-                          className="font-bold"
-                        />
+                        {item.word.original}
                       </span>
                     );
-                  }
-
-                  return (
-                    <span
-                      key={`w-${item.globalIndex}`}
-                      ref={isAudioCurrent ? activeWordRef : null}
-                      onClick={() => onIndexChange(item.globalIndex)}
-                      onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
-                      title={`Word #${item.globalIndex + 1}: Click to start reading here`}
-                      dir={item.word.isRtl ? 'rtl' : 'ltr'}
-                      className={`inline-block cursor-pointer px-1 py-0.5 rounded transition-all align-baseline ${
-                        isPast && isPlaying
-                          ? 'opacity-70 hover:opacity-100'
-                          : `${theme.textPrimary} hover:text-white hover:bg-white/5`
-                      }`}
-                    >
-                      {item.word.original}
-                    </span>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </LayoutGroup>
       </div>
 
       {/* Bottom Sticky Player Panel (Item 5: Locked on page; Item 8: Fades out after 5s mouse inactivity) */}

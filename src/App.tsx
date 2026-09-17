@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
 
 const STORAGE_KEYS = {
   SETTINGS: 'adhd_reader_settings_v1',
+  VIEW_MODE: 'adhd_reader_view_mode_v1',
   CURRENT_TEXT: 'adhd_reader_text_v1',
   CURRENT_TITLE: 'adhd_reader_title_v1',
   SAVED_DOCS: 'adhd_reader_saved_docs_v1',
@@ -65,7 +66,7 @@ const STORAGE_KEYS = {
 };
 
 export default function App() {
-  // 1. Settings state with safeStorage recovery and strict sanitization
+  // 1. Settings state with safeStorage recovery and strict sanitization (persisting chunkSize, fontSize, flowFontSize, etc.)
   const [settings, setSettings] = useState<ReaderSettings>(() => {
     try {
       const saved = safeStorage.getItem(STORAGE_KEYS.SETTINGS);
@@ -77,8 +78,13 @@ export default function App() {
           if (!HIGHLIGHT_COLORS[merged.highlightColor as keyof typeof HIGHLIGHT_COLORS]) merged.highlightColor = DEFAULT_SETTINGS.highlightColor;
           if (!FONT_CONFIGS[merged.fontFamily as keyof typeof FONT_CONFIGS]) merged.fontFamily = DEFAULT_SETTINGS.fontFamily;
           if (typeof merged.wpm !== 'number' || isNaN(merged.wpm) || merged.wpm < 50) merged.wpm = DEFAULT_SETTINGS.wpm;
-          if (typeof merged.fontSize !== 'number' || isNaN(merged.fontSize)) merged.fontSize = DEFAULT_SETTINGS.fontSize;
-          if (![1, 3, 5].includes(merged.chunkSize)) merged.chunkSize = 1;
+          if (typeof merged.fontSize !== 'number' || isNaN(merged.fontSize) || merged.fontSize < 16) merged.fontSize = DEFAULT_SETTINGS.fontSize;
+          if (typeof merged.flowFontSize !== 'number' || isNaN(merged.flowFontSize) || merged.flowFontSize < 12) merged.flowFontSize = DEFAULT_SETTINGS.flowFontSize;
+          if (![1, 3, 5].includes(Number(merged.chunkSize))) {
+            merged.chunkSize = 1;
+          } else {
+            merged.chunkSize = Number(merged.chunkSize) as 1 | 3 | 5;
+          }
           if (typeof merged.doNotDisturb !== 'boolean') merged.doNotDisturb = false;
           return merged;
         }
@@ -140,8 +146,36 @@ export default function App() {
   });
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [viewMode, setViewMode] = useState<ReaderViewMode>('rsvp');
+  const [viewMode, setViewMode] = useState<ReaderViewMode>(() => {
+    try {
+      const saved = safeStorage.getItem(STORAGE_KEYS.VIEW_MODE);
+      if (saved === 'rsvp' || saved === 'flow') {
+        return saved;
+      }
+    } catch {
+      // Ignore
+    }
+    return 'rsvp';
+  });
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Synchronize viewMode to localStorage so reader remembers user preference on refresh
+  useEffect(() => {
+    try {
+      safeStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode);
+    } catch {
+      // Ignore
+    }
+  }, [viewMode]);
+
+  // Synchronize settings (chunk size, font size, etc.) to localStorage on change
+  useEffect(() => {
+    try {
+      safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    } catch {
+      // Ignore
+    }
+  }, [settings]);
 
   // 4. Modals and drawers
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);

@@ -205,3 +205,73 @@ export function toggleDarkLightTheme(currentTheme: ThemeId): ThemeId {
   return currentTheme === 'light' ? 'midnight' : 'light';
 }
 
+export interface HighlightGradient {
+  start: string;
+  end: string;
+  text: string;
+  glow: string;
+}
+
+/**
+ * Returns a rich colored gradient configuration for the floating highlight pill/oval
+ */
+export function getHighlightGradient(markerColor: string): HighlightGradient {
+  const normalized = (markerColor || '').toLowerCase();
+
+  if (normalized.includes('ef4444') || normalized.includes('red') || normalized.includes('crimson')) {
+    return {
+      start: '#ff4d6d',
+      end: '#f43f5e',
+      text: '#ffffff',
+      glow: 'rgba(244, 63, 94, 0.45)',
+    };
+  }
+  if (normalized.includes('f59e0b') || normalized.includes('amber') || normalized.includes('facc15') || normalized.includes('gold')) {
+    return {
+      start: '#fde047',
+      end: '#f59e0b',
+      text: '#0f172a',
+      glow: 'rgba(245, 158, 11, 0.45)',
+    };
+  }
+  if (normalized.includes('10b981') || normalized.includes('emerald') || normalized.includes('green')) {
+    return {
+      start: '#34d399',
+      end: '#059669',
+      text: '#ffffff',
+      glow: 'rgba(16, 185, 129, 0.45)',
+    };
+  }
+  if (normalized.includes('3b82f6') || normalized.includes('blue')) {
+    return {
+      start: '#60a5fa',
+      end: '#2563eb',
+      text: '#ffffff',
+      glow: 'rgba(59, 130, 246, 0.45)',
+    };
+  }
+  if (normalized.includes('a855f7') || normalized.includes('purple') || normalized.includes('violet')) {
+    return {
+      start: '#c084fc',
+      end: '#7c3aed',
+      text: '#ffffff',
+      glow: 'rgba(168, 85, 247, 0.45)',
+    };
+  }
+  if (normalized.includes('06b6d4') || normalized.includes('cyan')) {
+    return {
+      start: '#22d3ee',
+      end: '#0891b2',
+      text: '#0f172a',
+      glow: 'rgba(6, 182, 212, 0.45)',
+    };
+  }
+
+  return {
+    start: markerColor,
+    end: `${markerColor}dd`,
+    text: '#ffffff',
+    glow: `${markerColor}40`,
+  };
+}
+
