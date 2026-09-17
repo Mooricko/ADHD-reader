@@ -27,6 +27,7 @@ interface HeaderProps {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   currentTitle: string;
+  isIdle?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   isFullscreen,
   onToggleFullscreen,
   currentTitle,
+  isIdle = false,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -48,7 +50,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="app-header"
-      className={`w-full border-b ${theme.borderClass} ${theme.cardBgClass} px-4 py-3 sm:px-6 transition-colors duration-200`}
+      className={`w-full border-b ${theme.borderClass} ${theme.cardBgClass} px-4 py-3 sm:px-6 transition-all duration-700 ease-out z-30 shrink-0 ${
+        isIdle ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+      }`}
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
         {/* Brand & Document Name */}

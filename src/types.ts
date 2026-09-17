@@ -19,6 +19,7 @@ export interface HighlightedWordParts {
   hasSentenceEnd: boolean;
   hasClausePause: boolean;
   hasParagraphBreak: boolean;
+  paragraphIndex?: number;
   index: number;
 }
 
@@ -33,6 +34,7 @@ export interface ReaderSettings {
   flowFontSize: number;
   lineHeight: number;
   letterSpacing: number;
+  focusParagraphBlur: boolean; // Optional feature that blurs text and unblurs active/hovered paragraph
   smartPunctuationPause: boolean;
   metronomeSound: boolean;
   metronomeVolume: number;

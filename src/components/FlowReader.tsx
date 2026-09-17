@@ -1,16 +1,12 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { 
-  Play, 
-  Pause, 
   RotateCcw, 
-  FastForward, 
-  Rewind, 
   Eye, 
-  CheckCircle2, 
   Clock,
   Headphones,
   Volume2,
-  VolumeX
+  VolumeX,
+  Focus
 } from 'lucide-react';
 import { HighlightedWordParts, ReaderSettings } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
@@ -19,6 +15,7 @@ import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { ProudSquidPlayButton } from './ProudSquidPlayButton';
+import { MarkerHighlight } from './MarkerHighlight';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -30,6 +27,12 @@ interface FlowReaderProps {
   onUpdateSettings: (updater: Partial<ReaderSettings>) => void;
   onRestart: () => void;
   onSwitchToRsvp: () => void;
+  isIdle?: boolean;
+}
+
+interface ParagraphGroup {
+  paragraphIndex: number;
+  words: Array<{ word: HighlightedWordParts; globalIndex: number }>;
 }
 
 export const FlowReader: React.FC<FlowReaderProps> = ({
@@ -42,13 +45,20 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   onUpdateSettings,
   onRestart,
   onSwitchToRsvp,
+  isIdle = false,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
   const font = FONT_CONFIGS[settings.fontFamily];
+  
   const activeWordRef = useRef<HTMLSpanElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const paragraphRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Hover tracking for floating highlighter pillow and paragraph focus
+  const [hoveredWordIndex, setHoveredWordIndex] = useState<number | null>(null);
+  const [hoveredParagraphIndex, setHoveredParagraphIndex] = useState<number | null>(null);
 
   const isPlayingRef = useRef(isPlaying);
   const currentIndexRef = useRef(currentIndex);
@@ -65,6 +75,54 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     onTogglePlayRef.current = onTogglePlay;
     onIndexChangeRef.current = onIndexChange;
   }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange]);
+
+  // Group words by paragraphIndex for paragraph-level focus blur and centering
+  const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
+    const groups: ParagraphGroup[] = [];
+    let currentGroup: ParagraphGroup = { paragraphIndex: 0, words: [] };
+
+    words.forEach((w, idx) => {
+      const pIdx = w.paragraphIndex ?? 0;
+      if (groups.length === 0 || currentGroup.paragraphIndex !== pIdx) {
+        if (currentGroup.words.length > 0) {
+          groups.push(currentGroup);
+        }
+        currentGroup = { paragraphIndex: pIdx, words: [] };
+      }
+      currentGroup.words.push({ word: w, globalIndex: idx });
+    });
+
+    if (currentGroup.words.length > 0) {
+      groups.push(currentGroup);
+    }
+
+    return groups;
+  }, [words]);
+
+  // Determine current active paragraph index from currentIndex
+  const activeWord = words[currentIndex];
+  const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
+
+  // Auto-scroll unblurred active paragraph to center of viewport
+  const scrollToActiveParagraph = useCallback((smooth = true) => {
+    const pEl = paragraphRefs.current[activeParagraphIndex];
+    if (pEl && containerRef.current) {
+      pEl.scrollIntoView({
+        behavior: smooth ? 'smooth' : 'auto',
+        block: 'center',
+      });
+    }
+  }, [activeParagraphIndex]);
+
+  const lastCenteredParagraphRef = useRef<number>(-1);
+
+  // Center active paragraph on paragraph change or while playing
+  useEffect(() => {
+    if (lastCenteredParagraphRef.current !== activeParagraphIndex || isPlaying || settings.focusParagraphBlur) {
+      lastCenteredParagraphRef.current = activeParagraphIndex;
+      scrollToActiveParagraph(true);
+    }
+  }, [activeParagraphIndex, isPlaying, settings.focusParagraphBlur, scrollToActiveParagraph]);
 
   // Playback timer & Speech Narration loop in Flow Mode
   useEffect(() => {
@@ -116,15 +174,15 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       const nextIdx = currIdx + 1;
       onIndexChangeRef.current(nextIdx);
 
-      const currentWord = allWords[nextIdx];
+      const currentWordObj = allWords[nextIdx];
       
       // Audio metronome tick synchronization
       if (settingsRef.current.metronomeSound) {
-        metronome.playTick(settingsRef.current.metronomeVolume, currentWord?.hasSentenceEnd);
+        metronome.playTick(settingsRef.current.metronomeVolume, currentWordObj?.hasSentenceEnd);
       }
 
       const delay = calculateWordDelayMs(
-        currentWord,
+        currentWordObj,
         settingsRef.current.wpm,
         settingsRef.current.smartPunctuationPause
       );
@@ -132,9 +190,9 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       timerRef.current = setTimeout(scheduleNextWord, delay);
     };
 
-    const currentWord = words[currentIndexRef.current] || words[0];
-    const initialDelay = currentWord
-      ? calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause)
+    const currentWordObj = words[currentIndexRef.current] || words[0];
+    const initialDelay = currentWordObj
+      ? calculateWordDelayMs(currentWordObj, settings.wpm, settings.smartPunctuationPause)
       : (60 / settings.wpm) * 1000;
 
     timerRef.current = setTimeout(scheduleNextWord, initialDelay);
@@ -158,16 +216,6 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     words
   ]);
 
-  // Auto-scroll to active word smoothly if playing
-  useEffect(() => {
-    if (activeWordRef.current && isPlaying) {
-      activeWordRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
-  }, [currentIndex, isPlaying]);
-
   const progressPercent = words.length > 0 ? Math.round(((currentIndex + 1) / words.length) * 100) : 0;
   const wordsRemaining = Math.max(0, words.length - 1 - currentIndex);
   const secondsRemaining = Math.round((wordsRemaining / Math.max(1, settings.wpm)) * 60);
@@ -175,10 +223,20 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const remainingSecs = secondsRemaining % 60;
   const formattedTimeRemaining = remainingMins > 0 ? `${remainingMins}m ${remainingSecs}s` : `${remainingSecs}s`;
 
+  // The targeted word for the floating marker highlighter pillow:
+  // Follows the user's cursor position when hovering, or defaults to current reading word
+  const targetWordIndex = hoveredWordIndex !== null ? hoveredWordIndex : currentIndex;
+
+  const isTextRtl = words.length > 0 && Boolean(words[0].isRtl || words.some((w) => w.isRtl));
+
   return (
-    <div className="flex flex-col flex-1 w-full max-w-4xl mx-auto px-4 py-4 sm:py-6 justify-between">
-      {/* Top Controls & Meta */}
-      <div className="flex items-center justify-between gap-4 text-xs mb-4">
+    <div className="flex flex-col flex-1 w-full max-w-4xl mx-auto px-4 py-3 sm:py-4 justify-between h-full min-h-0 overflow-hidden relative select-none">
+      {/* Top Controls & Meta (with 5-second mouse idle fade-out) */}
+      <div 
+        className={`flex flex-wrap items-center justify-between gap-3 text-xs mb-3 transition-all duration-700 ease-out shrink-0 z-20 ${
+          isIdle ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+        }`}
+      >
         <div className="flex items-center gap-2">
           <span className={`px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} font-mono font-medium ${theme.textPrimary}`}>
             {currentIndex + 1} <span className={theme.textMuted}>/ {words.length}</span>
@@ -190,6 +248,69 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Word Size Controller (Matching RSVP Mode) */}
+          <div className={`flex items-center rounded-lg border ${theme.borderClass} ${theme.cardBgClass} p-0.5 text-xs font-mono`}>
+            <button
+              id="flow-font-decrease-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ flowFontSize: Math.max(14, (settings.flowFontSize || 22) - 2) })}
+              title="Decrease word size (A-)"
+              aria-label="Decrease word size"
+              className={`px-2 py-0.5 rounded font-semibold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
+            >
+              A-
+            </button>
+            <span className={`px-1.5 font-bold ${theme.textPrimary}`}>
+              {settings.flowFontSize || 22}px
+            </span>
+            <button
+              id="flow-font-increase-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ flowFontSize: Math.min(52, (settings.flowFontSize || 22) + 2) })}
+              title="Increase word size (A+)"
+              aria-label="Increase word size"
+              className={`px-2 py-0.5 rounded font-semibold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
+            >
+              A+
+            </button>
+          </div>
+
+          {/* Paragraph Blur Focus Toggle (Item 3) */}
+          <button
+            id="toggle-paragraph-blur-btn"
+            type="button"
+            onClick={() => onUpdateSettings({ focusParagraphBlur: !settings.focusParagraphBlur })}
+            title={
+              settings.focusParagraphBlur
+                ? 'Paragraph Focus Blur: ON (Only active or hovered paragraph is unblurred)'
+                : 'Paragraph Focus Blur: OFF (Click to focus on one paragraph at a time)'
+            }
+            aria-label="Toggle Paragraph Blur Focus"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+              settings.focusParagraphBlur
+                ? 'font-bold shadow-xs'
+                : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+            }`}
+            style={
+              settings.focusParagraphBlur
+                ? {
+                    borderColor: `${highlight.hex}80`,
+                    color: highlight.hex,
+                    backgroundColor: `${highlight.hex}18`,
+                  }
+                : undefined
+            }
+          >
+            <Focus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Paragraph Focus</span>
+            <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${
+              settings.focusParagraphBlur ? 'bg-red-500/20 text-red-400' : 'bg-white/10'
+            }`}>
+              {settings.focusParagraphBlur ? 'ON' : 'OFF'}
+            </span>
+          </button>
+
+          {/* Switch to RSVP View Button */}
           <button
             id="flow-switch-to-rsvp-btn"
             type="button"
@@ -197,76 +318,116 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border ${theme.borderClass} ${theme.textPrimary} hover:${theme.accentSurface} transition-colors font-medium`}
           >
             <Eye className="w-3.5 h-3.5 text-red-500" />
-            <span>Switch to RSVP Flash</span>
+            <span className="hidden sm:inline">Switch to RSVP</span>
           </button>
         </div>
       </div>
 
-      {/* Full Document Flow Content */}
+      {/* Main Reading Stage & Text Scroll Container (Item 1 & Item 5: Locked player panel, text itself scrolls on RSVP background) */}
       <div 
         ref={containerRef}
         id="flow-text-container"
-        className={`flex-1 overflow-y-auto rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-6 sm:p-10 my-2 shadow-inner leading-relaxed select-text ${font.className}`}
+        onMouseLeave={() => {
+          setHoveredWordIndex(null);
+          setHoveredParagraphIndex(null);
+        }}
+        className={`flex-1 min-h-0 overflow-y-auto px-2 sm:px-6 py-4 sm:py-8 select-text leading-relaxed relative ${font.className} scroll-smooth`}
         style={{
           fontSize: `${settings.flowFontSize || 22}px`,
           lineHeight: settings.lineHeight || 1.8,
           letterSpacing: `${settings.letterSpacing || 0.02}em`,
         }}
       >
-        <div className="max-w-3xl mx-auto">
-          {(() => {
-            const isTextRtl = words.length > 0 && Boolean(words[0].isRtl || words.some((w) => w.isRtl));
+        {/* Ambient Glow Focus Halo (Matching RSVP background) */}
+        <div 
+          className="absolute inset-0 max-w-2xl mx-auto rounded-full blur-3xl pointer-events-none opacity-10 transition-colors"
+          style={{ backgroundColor: highlight.hex }}
+        />
+
+        {/* Flow Content Rendered by Paragraphs */}
+        <div 
+          className={`max-w-3xl mx-auto relative z-10 ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
+          dir={isTextRtl ? 'rtl' : 'ltr'}
+        >
+          {paragraphGroups.map((group) => {
+            // Determine if this paragraph is unblurred (Item 3)
+            const isParagraphUnblurred =
+              !settings.focusParagraphBlur ||
+              group.paragraphIndex === hoveredParagraphIndex ||
+              (hoveredParagraphIndex === null && group.paragraphIndex === activeParagraphIndex);
+
             return (
-              <p 
-                className={`inline ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
-                dir={isTextRtl ? 'rtl' : 'ltr'}
+              <div
+                key={group.paragraphIndex}
+                ref={(el) => {
+                  paragraphRefs.current[group.paragraphIndex] = el;
+                }}
+                onMouseEnter={() => setHoveredParagraphIndex(group.paragraphIndex)}
+                className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed ${
+                  isParagraphUnblurred
+                    ? 'opacity-100 blur-0'
+                    : 'opacity-25 blur-[5px] select-none pointer-events-auto'
+                }`}
               >
-                {words.map((word, idx) => {
-                  const isActive = idx === currentIndex;
-                  const isPast = idx < currentIndex;
+                {group.words.map((item) => {
+                  const isTarget = item.globalIndex === targetWordIndex;
+                  const isAudioCurrent = item.globalIndex === currentIndex;
+                  const isPast = item.globalIndex < currentIndex;
+
+                  if (isTarget) {
+                    return (
+                      <span
+                        key={item.globalIndex}
+                        ref={isAudioCurrent ? activeWordRef : null}
+                        onClick={() => onIndexChange(item.globalIndex)}
+                        onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
+                        title={`Word #${item.globalIndex + 1}: Click to start reading here`}
+                        dir={item.word.isRtl ? 'rtl' : 'ltr'}
+                        className="inline-block cursor-pointer align-baseline mx-[1px]"
+                      >
+                        {/* Marker Highlight Pillow (Item 6 & 7: Follows cursor or active word) */}
+                        <MarkerHighlight
+                          highlight={item.word.original}
+                          markerColor={highlight.hex}
+                          highlightedTextColor="#0f172a"
+                          isRtl={Boolean(item.word.isRtl)}
+                          isActive={true}
+                          className="font-bold scale-[1.03] transition-transform"
+                        />
+                      </span>
+                    );
+                  }
 
                   return (
-                    <React.Fragment key={idx}>
-                      <span
-                        ref={isActive ? activeWordRef : null}
-                        onClick={() => onIndexChange(idx)}
-                        title={`Word #${idx + 1}: Click to start reading here`}
-                        dir={word.isRtl ? 'rtl' : 'ltr'}
-                        className={`inline-block cursor-pointer transition-all px-1.5 py-0.5 rounded-lg ${
-                          isActive
-                            ? 'font-semibold scale-105 shadow-sm'
-                            : isPast && isPlaying
-                            ? 'opacity-80 hover:opacity-100'
-                            : 'hover:bg-white/5'
-                        }`}
-                        style={
-                          isActive
-                            ? {
-                                boxShadow: `0 0 0 2px ${highlight.hex}`,
-                                backgroundColor: `${highlight.hex}25`,
-                              }
-                            : undefined
-                        }
-                      >
-                        <span className={theme.textPrimary}>
-                          {word.original}
-                        </span>
-                      </span>
-                      {' '}
-                      {word.hasParagraphBreak && (
-                        <span className="block h-6 sm:h-8" />
-                      )}
-                    </React.Fragment>
+                    <span
+                      key={item.globalIndex}
+                      ref={isAudioCurrent ? activeWordRef : null}
+                      onClick={() => onIndexChange(item.globalIndex)}
+                      onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
+                      title={`Word #${item.globalIndex + 1}: Click to start reading here`}
+                      dir={item.word.isRtl ? 'rtl' : 'ltr'}
+                      className={`inline-block cursor-pointer px-1 py-0.5 rounded transition-all align-baseline ${
+                        isPast && isPlaying
+                          ? 'opacity-70 hover:opacity-100'
+                          : `${theme.textPrimary} hover:text-white hover:bg-white/5`
+                      }`}
+                    >
+                      {item.word.original}
+                    </span>
                   );
                 })}
-              </p>
+              </div>
             );
-          })()}
+          })}
         </div>
       </div>
 
-      {/* Bottom Sticky Control Strip */}
-      <div className={`mt-4 rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 shadow-lg flex flex-col gap-3`}>
+      {/* Bottom Sticky Player Panel (Item 5: Locked on page; Item 8: Fades out after 5s mouse inactivity) */}
+      <div 
+        className={`mt-3 rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 shadow-lg flex flex-col gap-3 transition-all duration-700 ease-out shrink-0 z-20 ${
+          isIdle ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button
@@ -292,7 +453,6 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             accentColor={highlight.hex}
             title={isPlaying ? 'Pause Tracker (Space)' : 'Auto-Track Reading (Space)'}
           />
-
 
           {/* Audio Controls (Metronome + Voice-Over Narration) */}
           <div className="flex items-center gap-2">

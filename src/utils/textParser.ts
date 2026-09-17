@@ -226,6 +226,7 @@ export function parseTextIntoWords(rawText: string, highlightStyle: HighlightSty
     rawTokens.forEach((token, wIndex) => {
       const isLastInParagraph = wIndex === rawTokens.length - 1;
       const parsedWord = splitWordParts(token, highlightStyle, globalWordIndex);
+      parsedWord.paragraphIndex = pIndex;
       
       if (isLastInParagraph && !isLastParagraph) {
         parsedWord.hasParagraphBreak = true;

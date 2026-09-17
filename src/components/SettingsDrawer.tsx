@@ -267,26 +267,49 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             </div>
           </div>
 
-          {/* 5. Font Size Slider */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className={`font-bold uppercase tracking-wider ${theme.textMuted}`}>
-                RSVP Word Size
-              </span>
-              <span className={`font-mono font-bold ${theme.textPrimary}`}>
-                {settings.fontSize}px
-              </span>
+          {/* 5. Font Size Sliders (RSVP and Full Text Flow) */}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className={`font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                  RSVP Word Size
+                </span>
+                <span className={`font-mono font-bold ${theme.textPrimary}`}>
+                  {settings.fontSize}px
+                </span>
+              </div>
+              <input
+                id="rsvp-font-size-slider"
+                type="range"
+                min="32"
+                max="96"
+                step="2"
+                value={settings.fontSize}
+                onChange={(e) => onUpdateSettings({ fontSize: parseInt(e.target.value, 10) })}
+                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
+              />
             </div>
-            <input
-              id="rsvp-font-size-slider"
-              type="range"
-              min="32"
-              max="96"
-              step="2"
-              value={settings.fontSize}
-              onChange={(e) => onUpdateSettings({ fontSize: parseInt(e.target.value, 10) })}
-              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
-            />
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className={`font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                  Full Text Flow Word Size
+                </span>
+                <span className={`font-mono font-bold ${theme.textPrimary}`}>
+                  {settings.flowFontSize || 22}px
+                </span>
+              </div>
+              <input
+                id="flow-font-size-slider"
+                type="range"
+                min="14"
+                max="48"
+                step="2"
+                value={settings.flowFontSize || 22}
+                onChange={(e) => onUpdateSettings({ flowFontSize: parseInt(e.target.value, 10) })}
+                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
+              />
+            </div>
           </div>
 
           {/* 6. Focus & Optical Alignment Controls */}
@@ -294,6 +317,25 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
               Focus Guides & Anchors
             </label>
+
+            {/* Paragraph Focus Blur Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
+              <div>
+                <div className={`text-xs font-semibold ${theme.textPrimary}`}>
+                  Paragraph Focus Blur
+                </div>
+                <div className={`text-[11px] ${theme.textMuted}`}>
+                  Blurs text flow and unblurs only active or hovered paragraph
+                </div>
+              </div>
+              <input
+                id="toggle-paragraph-blur-settings"
+                type="checkbox"
+                checked={settings.focusParagraphBlur}
+                onChange={(e) => onUpdateSettings({ focusParagraphBlur: e.target.checked })}
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
+              />
+            </div>
 
             {/* Optical Center Lock */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">

@@ -36,9 +36,10 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   theme: 'midnight',
   fontFamily: 'lexend',
   fontSize: 54,
-  flowFontSize: 20,
+  flowFontSize: 22,
   lineHeight: 1.8,
   letterSpacing: 0.02,
+  focusParagraphBlur: false,
   smartPunctuationPause: true,
   metronomeSound: false,
   metronomeVolume: 0.3,
@@ -424,12 +425,57 @@ export default function App() {
     handleUpdateSettings
   ]);
 
+  const [isIdle, setIsIdle] = useState(false);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen;
+
+  const resetIdleTimer = useCallback(() => {
+    setIsIdle(false);
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    if (isAnyModalOpen) return;
+    idleTimerRef.current = setTimeout(() => {
+      setIsIdle(true);
+    }, 5000);
+  }, [isAnyModalOpen]);
+
+  useEffect(() => {
+    if (isAnyModalOpen) {
+      setIsIdle(false);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      return;
+    }
+
+    const handleActivity = () => {
+      resetIdleTimer();
+    };
+
+    window.addEventListener('mousemove', handleActivity, { passive: true });
+    window.addEventListener('mousedown', handleActivity, { passive: true });
+    window.addEventListener('keydown', handleActivity, { passive: true });
+    window.addEventListener('touchstart', handleActivity, { passive: true });
+    window.addEventListener('scroll', handleActivity, { passive: true });
+
+    resetIdleTimer();
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('mousedown', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+    };
+  }, [resetIdleTimer, isAnyModalOpen]);
+
   const currentThemeConfig = getTheme(settings.theme);
 
   return (
     <div 
       id="adhd-reader-app"
-      className={`min-h-screen flex flex-col ${currentThemeConfig.bgClass} ${currentThemeConfig.textPrimary} transition-colors duration-200`}
+      className={`h-screen max-h-screen overflow-hidden flex flex-col ${currentThemeConfig.bgClass} ${currentThemeConfig.textPrimary} transition-colors duration-200 select-none`}
     >
       {/* Toast Notification for Extension Web Capture */}
       {toastNotification && (
@@ -453,11 +499,12 @@ export default function App() {
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
           currentTitle={currentTitle}
+          isIdle={isIdle}
         />
       )}
 
       {/* Main Interactive Stage */}
-      <main className="flex-1 flex flex-col relative w-full h-full">
+      <main className="flex-1 flex flex-col relative w-full h-full min-h-0 overflow-hidden">
         {viewMode === 'rsvp' ? (
           <RSVPReader
             words={parsedWords}
@@ -468,6 +515,7 @@ export default function App() {
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             onRestart={handleRestart}
+            isIdle={isIdle}
           />
         ) : (
           <FlowReader
@@ -480,6 +528,7 @@ export default function App() {
             onUpdateSettings={handleUpdateSettings}
             onRestart={handleRestart}
             onSwitchToRsvp={() => setViewMode('rsvp')}
+            isIdle={isIdle}
           />
         )}
       </main>

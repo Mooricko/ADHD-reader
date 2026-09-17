@@ -37,6 +37,7 @@ interface RSVPReaderProps {
   settings: ReaderSettings;
   onUpdateSettings: (updater: Partial<ReaderSettings>) => void;
   onRestart: () => void;
+  isIdle?: boolean;
 }
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
@@ -48,6 +49,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   settings,
   onUpdateSettings,
   onRestart,
+  isIdle = false,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -281,9 +283,13 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   const formattedTimeRemaining = remainingMins > 0 ? `${remainingMins}m ${remainingSecs}s` : `${remainingSecs}s`;
 
   return (
-    <div className="flex flex-col flex-1 w-full max-w-5xl mx-auto px-4 py-4 sm:py-8 justify-between select-none">
+    <div className="flex flex-col flex-1 w-full max-w-5xl mx-auto px-4 py-3 sm:py-6 justify-between select-none min-h-0 overflow-hidden relative">
       {/* Top Status & Context Info */}
-      <div className="flex items-center justify-between gap-4 text-xs">
+      <div 
+        className={`flex items-center justify-between gap-3 text-xs transition-all duration-700 ease-out shrink-0 z-20 ${
+          isIdle ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+        }`}
+      >
         <div className="flex items-center gap-2">
           <span className={`px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} font-mono font-medium ${theme.textPrimary}`}>
             {currentIndex + 1} <span className={theme.textMuted}>/ {words.length}</span>
@@ -294,8 +300,35 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           </span>
         </div>
 
-        {/* Morph Transition Toggle & Speed Indicator Badge */}
+        {/* Word Size Controller, Morph Transition Toggle & Speed Indicator Badge */}
         <div className="flex items-center gap-2">
+          {/* Word Size Controller */}
+          <div className={`flex items-center rounded-lg border ${theme.borderClass} ${theme.cardBgClass} p-0.5 text-xs font-mono`}>
+            <button
+              id="rsvp-font-decrease-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ fontSize: Math.max(28, settings.fontSize - 4) })}
+              title="Decrease word size (A-)"
+              aria-label="Decrease word size"
+              className={`px-2 py-0.5 rounded font-semibold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
+            >
+              A-
+            </button>
+            <span className={`px-1.5 font-bold ${theme.textPrimary}`}>
+              {settings.fontSize}px
+            </span>
+            <button
+              id="rsvp-font-increase-btn"
+              type="button"
+              onClick={() => onUpdateSettings({ fontSize: Math.min(100, settings.fontSize + 4) })}
+              title="Increase word size (A+)"
+              aria-label="Increase word size"
+              className={`px-2 py-0.5 rounded font-semibold ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
+            >
+              A+
+            </button>
+          </div>
+
           <button
             id="toggle-morph-transition-btn"
             type="button"
@@ -430,7 +463,11 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       </div>
 
       {/* Playback Controls & Timeline Bar */}
-      <div className={`w-full rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 sm:p-5 shadow-lg`}>
+      <div 
+        className={`w-full rounded-2xl border ${theme.borderClass} ${theme.cardBgClass} p-4 sm:p-5 shadow-lg transition-all duration-700 ease-out shrink-0 z-20 ${
+          isIdle ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+        }`}
+      >
         {/* Timeline Scrubber */}
         <div className="space-y-1.5 mb-4">
           <div className="flex items-center justify-between text-xs font-mono font-medium">
