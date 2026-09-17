@@ -8,6 +8,109 @@ export function isRtlText(text: string): boolean {
 }
 
 /**
+ * Non-left-joining Arabic / Persian characters (Right-joining only).
+ * These characters connect to preceding letters on the right, but never connect to
+ * succeeding letters on their left in cursive script (e.g. Alef, Dal, Reh, Waw).
+ */
+const ARABIC_NON_LEFT_JOINING = new Set([
+  '\u0622', '\u0623', '\u0624', '\u0625', '\u0627', '\u0671', '\u0672', '\u0673', '\u0675', // Alef variants
+  '\u062F', '\u0630', '\u0688', '\u0689', '\u068A', '\u068B', '\u068C', '\u068D', '\u068E', '\u068F', '\u0690', // Dal variants
+  '\u0631', '\u0632', '\u0691', '\u0692', '\u0693', '\u0694', '\u0695', '\u0696', '\u0697', '\u0698', '\u0699', // Reh/Zhe variants
+  '\u0648', '\u0676', '\u0677', '\u06C4', '\u06C5', '\u06C6', '\u06C7', '\u06C8', '\u06C9', '\u06CA', '\u06CB', '\u06CF', // Waw variants
+  '\u0629', '\u06C0', // Teh Marbuta
+]);
+
+/**
+ * Checks if a character connects to the following (left) Arabic letter.
+ */
+function canArabicConnectLeft(ch: string): boolean {
+  if (!ch) return false;
+  if (ch === '\u200D' || ch === '\u0640') return true;
+  if (ARABIC_NON_LEFT_JOINING.has(ch)) return false;
+  const code = ch.charCodeAt(0);
+  return (
+    (code >= 0x0600 && code <= 0x06FF) ||
+    (code >= 0x0750 && code <= 0x077F) ||
+    (code >= 0x08A0 && code <= 0x08FF) ||
+    (code >= 0xFB50 && code <= 0xFDFF) ||
+    (code >= 0xFE70 && code <= 0xFEFF)
+  );
+}
+
+/**
+ * Checks if a character connects to the preceding (right) Arabic letter.
+ */
+function canArabicConnectRight(ch: string): boolean {
+  if (!ch) return false;
+  if (ch === '\u200D' || ch === '\u0640') return true;
+  if (ch === '\u200C' || ch === '\u0621') return false; // ZWNJ and isolated Hamza do not connect
+  const code = ch.charCodeAt(0);
+  return (
+    (code >= 0x0600 && code <= 0x06FF) ||
+    (code >= 0x0750 && code <= 0x077F) ||
+    (code >= 0x08A0 && code <= 0x08FF) ||
+    (code >= 0xFB50 && code <= 0xFDFF) ||
+    (code >= 0xFE70 && code <= 0xFEFF)
+  );
+}
+
+function getLastArabicBaseChar(s: string): string {
+  for (let i = s.length - 1; i >= 0; i--) {
+    const ch = s[i];
+    if (ch !== '\u200C' && ch !== '\u200D' && !/\p{M}/u.test(ch)) {
+      return ch;
+    }
+  }
+  return '';
+}
+
+function getFirstArabicBaseChar(s: string): string {
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch !== '\u200C' && ch !== '\u200D' && !/\p{M}/u.test(ch)) {
+      return ch;
+    }
+  }
+  return '';
+}
+
+/**
+ * Preserves seamless cursive joining across split Arabic/Farsi word parts
+ * using Unicode Zero-Width Joiners (ZWJ, \u200D).
+ * When letters are separated across HTML spans for middle-highlighting, ZWJ
+ * prevents font engines from rendering disconnected/isolated letter forms.
+ */
+export function preserveArabicCursiveJoining(
+  before: string,
+  highlight: string,
+  after: string
+): [string, string, string] {
+  let b = before;
+  let h = highlight;
+  let a = after;
+
+  if (b && h) {
+    const lastB = getLastArabicBaseChar(b);
+    const firstH = getFirstArabicBaseChar(h);
+    if (canArabicConnectLeft(lastB) && canArabicConnectRight(firstH)) {
+      if (!b.endsWith('\u200D')) b += '\u200D';
+      if (!h.startsWith('\u200D')) h = '\u200D' + h;
+    }
+  }
+
+  if (h && a) {
+    const lastH = getLastArabicBaseChar(h);
+    const firstA = getFirstArabicBaseChar(a);
+    if (canArabicConnectLeft(lastH) && canArabicConnectRight(firstA)) {
+      if (!h.endsWith('\u200D')) h += '\u200D';
+      if (!a.startsWith('\u200D')) a = '\u200D' + a;
+    }
+  }
+
+  return [b, h, a];
+}
+
+/**
  * Extracts visible letter indices, excluding Zero-Width Non-Joiner (\u200C),
  * Zero-Width Joiner (\u200D), and Unicode diacritics/marks.
  */
@@ -244,6 +347,14 @@ export function splitWordParts(token: string, style: HighlightStyle = 'middle-tw
         highlightedText = coreWord.slice(rawStart, rawEnd);
         afterHighlight = coreWord.slice(rawEnd);
       }
+    }
+
+    if (beforeHighlight || highlightedText || afterHighlight) {
+      [beforeHighlight, highlightedText, afterHighlight] = preserveArabicCursiveJoining(
+        beforeHighlight,
+        highlightedText,
+        afterHighlight
+      );
     }
   } else {
     // English / LTR Highlighting Logic

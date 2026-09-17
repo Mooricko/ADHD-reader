@@ -85,8 +85,15 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
   // Helper to compute middle offset for highlighted letters relative to word center
   const computeMiddleOffset = (wordEl: HTMLElement | null, hlEl: HTMLElement | null): number => {
     if (!wordEl || !hlEl) return 0;
-    const wordCenter = wordEl.offsetWidth / 2;
-    const hlCenter = hlEl.offsetLeft + hlEl.offsetWidth / 2;
+    const wordRect = wordEl.getBoundingClientRect();
+    const hlRect = hlEl.getBoundingClientRect();
+    if (wordRect.width === 0 || hlRect.width === 0) {
+      const wordCenter = wordEl.offsetWidth / 2;
+      const hlCenter = hlEl.offsetLeft + hlEl.offsetWidth / 2;
+      return wordCenter - hlCenter;
+    }
+    const wordCenter = wordRect.left + wordRect.width / 2;
+    const hlCenter = hlRect.left + hlRect.width / 2;
     return wordCenter - hlCenter;
   };
 
@@ -271,7 +278,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
           key={currentIndex}
           ref={standardWordRef}
           dir={currentWord.isRtl ? 'rtl' : 'ltr'}
-          className="inline-flex items-baseline justify-center whitespace-nowrap will-change-transform animate-rsvp-fade-in"
+          className="inline-block text-center whitespace-nowrap will-change-transform animate-rsvp-fade-in"
           style={{
             transform:
               settings.opticalCenterLock && standardOffset !== 0
@@ -280,10 +287,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
             animationDuration: `${fadeDurationMs}ms`,
           }}
         >
-          <span className={theme.textPrimary}>
-            {currentWord.prefixPunct + currentWord.beforeHighlight}
-          </span>
-          <span
+          <span className={theme.textPrimary}>{currentWord.prefixPunct + currentWord.beforeHighlight}</span><span
             ref={standardHighlightRef}
             className={
               currentWord.isRtl
@@ -291,12 +295,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
                 : 'font-bold px-[0.5px] transition-colors'
             }
             style={{ color: highlight.hex }}
-          >
-            {currentWord.highlightedText}
-          </span>
-          <span className={theme.textPrimary}>
-            {currentWord.afterHighlight + currentWord.suffixPunct}
-          </span>
+          >{currentWord.highlightedText}</span><span className={theme.textPrimary}>{currentWord.afterHighlight + currentWord.suffixPunct}</span>
         </div>
       </div>
     );
@@ -323,7 +322,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
         <div
           ref={layer1Ref}
           dir={prevWordState?.word.isRtl ? 'rtl' : 'ltr'}
-          className="absolute inline-flex items-baseline justify-center whitespace-nowrap will-change-transform pointer-events-none"
+          className="absolute inline-block text-center whitespace-nowrap will-change-transform pointer-events-none"
           style={{
             transform:
               prevWordState?.offset !== undefined && prevWordState.offset !== 0
@@ -335,22 +334,14 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
         >
           {prevWordState && (
             <>
-              <span className={theme.textPrimary}>
-                {prevWordState.word.prefixPunct + prevWordState.word.beforeHighlight}
-              </span>
-              <span
+              <span className={theme.textPrimary}>{prevWordState.word.prefixPunct + prevWordState.word.beforeHighlight}</span><span
                 className={
                   prevWordState.word.isRtl
                     ? 'font-bold transition-colors'
                     : 'font-bold px-[0.5px] transition-colors'
                 }
                 style={{ color: highlight.hex }}
-              >
-                {prevWordState.word.highlightedText}
-              </span>
-              <span className={theme.textPrimary}>
-                {prevWordState.word.afterHighlight + prevWordState.word.suffixPunct}
-              </span>
+              >{prevWordState.word.highlightedText}</span><span className={theme.textPrimary}>{prevWordState.word.afterHighlight + prevWordState.word.suffixPunct}</span>
             </>
           )}
         </div>
@@ -359,15 +350,12 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
         <div
           ref={layer2Ref}
           dir={currentWord.isRtl ? 'rtl' : 'ltr'}
-          className="inline-flex items-baseline justify-center whitespace-nowrap will-change-transform"
+          className="inline-block text-center whitespace-nowrap will-change-transform"
           style={{
             transform: currOffset !== 0 ? `translateX(${currOffset}px)` : undefined,
           }}
         >
-          <span className={theme.textPrimary}>
-            {currentWord.prefixPunct + currentWord.beforeHighlight}
-          </span>
-          <span
+          <span className={theme.textPrimary}>{currentWord.prefixPunct + currentWord.beforeHighlight}</span><span
             ref={currHighlightRef}
             className={
               currentWord.isRtl
@@ -375,12 +363,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
                 : 'font-bold px-[0.5px] transition-colors'
             }
             style={{ color: highlight.hex }}
-          >
-            {currentWord.highlightedText}
-          </span>
-          <span className={theme.textPrimary}>
-            {currentWord.afterHighlight + currentWord.suffixPunct}
-          </span>
+          >{currentWord.highlightedText}</span><span className={theme.textPrimary}>{currentWord.afterHighlight + currentWord.suffixPunct}</span>
         </div>
       </div>
     </>

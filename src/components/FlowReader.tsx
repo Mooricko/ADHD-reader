@@ -232,25 +232,24 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                         onClick={() => onIndexChange(idx)}
                         title={`Word #${idx + 1}: Click to start reading here`}
                         dir={word.isRtl ? 'rtl' : 'ltr'}
-                        className={`inline-block cursor-pointer transition-all px-0.5 rounded ${
+                        className={`inline-block cursor-pointer transition-all px-1.5 py-0.5 rounded-lg ${
                           isActive
-                            ? `ring-2 ring-red-500 ring-offset-2 ring-offset-black bg-red-500/15 font-semibold scale-105 shadow-xs`
+                            ? 'font-semibold scale-105 shadow-sm'
                             : isPast && isPlaying
                             ? 'opacity-80 hover:opacity-100'
                             : 'hover:bg-white/5'
                         }`}
+                        style={
+                          isActive
+                            ? {
+                                boxShadow: `0 0 0 2px ${highlight.hex}`,
+                                backgroundColor: `${highlight.hex}25`,
+                              }
+                            : undefined
+                        }
                       >
                         <span className={theme.textPrimary}>
-                          {word.prefixPunct + word.beforeHighlight}
-                        </span>
-                        <span 
-                          className="font-bold transition-colors"
-                          style={{ color: highlight.hex }}
-                        >
-                          {word.highlightedText}
-                        </span>
-                        <span className={theme.textPrimary}>
-                          {word.afterHighlight + word.suffixPunct}
+                          {word.original}
                         </span>
                       </span>
                       {' '}
