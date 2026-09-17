@@ -78,13 +78,15 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
 
   // Group words by paragraphIndex for paragraph-level focus blur and centering
   const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
+    if (!words || words.length === 0) return [];
+
     const groups: ParagraphGroup[] = [];
-    let currentGroup: ParagraphGroup = { paragraphIndex: 0, words: [] };
+    let currentGroup: ParagraphGroup | null = null;
 
     words.forEach((w, idx) => {
       const pIdx = w.paragraphIndex ?? 0;
-      if (groups.length === 0 || currentGroup.paragraphIndex !== pIdx) {
-        if (currentGroup.words.length > 0) {
+      if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
+        if (currentGroup) {
           groups.push(currentGroup);
         }
         currentGroup = { paragraphIndex: pIdx, words: [] };
@@ -92,7 +94,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       currentGroup.words.push({ word: w, globalIndex: idx });
     });
 
-    if (currentGroup.words.length > 0) {
+    if (currentGroup) {
       groups.push(currentGroup);
     }
 
@@ -349,7 +351,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
           className={`max-w-3xl mx-auto relative z-10 ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
           dir={isTextRtl ? 'rtl' : 'ltr'}
         >
-          {paragraphGroups.map((group) => {
+          {paragraphGroups.map((group, groupIdx) => {
             // Determine if this paragraph is unblurred (Item 3)
             const isParagraphUnblurred =
               !settings.focusParagraphBlur ||
@@ -358,7 +360,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
 
             return (
               <div
-                key={group.paragraphIndex}
+                key={`para-${group.paragraphIndex}-${groupIdx}`}
                 ref={(el) => {
                   paragraphRefs.current[group.paragraphIndex] = el;
                 }}
@@ -377,7 +379,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                   if (isTarget) {
                     return (
                       <span
-                        key={item.globalIndex}
+                        key={`w-target-${item.globalIndex}`}
                         ref={isAudioCurrent ? activeWordRef : null}
                         onClick={() => onIndexChange(item.globalIndex)}
                         onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
@@ -385,14 +387,14 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                         dir={item.word.isRtl ? 'rtl' : 'ltr'}
                         className="inline-block cursor-pointer align-baseline mx-[1px]"
                       >
-                        {/* Marker Highlight Pillow (Item 6 & 7: Follows cursor or active word) */}
+                        {/* Marker Highlight Pillow (Clean, non-bouncy focus) */}
                         <MarkerHighlight
                           highlight={item.word.original}
                           markerColor={highlight.hex}
                           highlightedTextColor="#0f172a"
                           isRtl={Boolean(item.word.isRtl)}
                           isActive={true}
-                          className="font-bold scale-[1.03] transition-transform"
+                          className="font-bold"
                         />
                       </span>
                     );
@@ -400,7 +402,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
 
                   return (
                     <span
-                      key={item.globalIndex}
+                      key={`w-${item.globalIndex}`}
                       ref={isAudioCurrent ? activeWordRef : null}
                       onClick={() => onIndexChange(item.globalIndex)}
                       onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}

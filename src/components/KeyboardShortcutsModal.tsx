@@ -28,6 +28,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     { key: 'R', desc: 'Restart reading from the beginning' },
     { key: 'F', desc: 'Toggle Fullscreen distraction-free mode' },
     { key: 'M', desc: 'Switch between RSVP and Full Text Flow mode' },
+    { key: 'T', desc: 'Open Focus Reading Timer' },
+    { key: 'D', desc: 'Toggle Dark / Light Theme mode' },
     { key: 'S', desc: 'Toggle Metronome focus sound' },
     { key: 'V', desc: 'Toggle Voice-Over Narration (Web Speech API)' },
     { key: 'Esc', desc: 'Close modals / Exit Fullscreen' },
@@ -67,7 +69,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         <div className="p-6 space-y-2.5 max-h-[70vh] overflow-y-auto">
           {shortcuts.map((sc, i) => (
             <div 
-              key={i}
+              key={`sc-${sc.key}-${i}`}
               className={`flex items-center justify-between p-2.5 rounded-xl border ${theme.borderClass} ${theme.inputBg}`}
             >
               <span className={`text-xs font-medium ${theme.textPrimary}`}>

@@ -34,20 +34,9 @@ export const MarkerHighlight: React.FC<MarkerHighlightProps> = ({
   isRtl = false,
   isActive = true,
 }) => {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    // Trigger marker expand animation when active
-    setMounted(false);
-    const raf = requestAnimationFrame(() => {
-      setMounted(true);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [highlight, isActive]);
-
   return (
     <span
-      className={`inline-block select-text will-change-transform ${className}`}
+      className={`inline-block select-text ${className}`}
       style={{
         fontSize: fontSize ? `${fontSize}px` : undefined,
         fontWeight,
@@ -58,22 +47,19 @@ export const MarkerHighlight: React.FC<MarkerHighlightProps> = ({
     >
       {before && <span>{before}</span>}
       <span className="relative inline-block px-1 mx-[1px]">
-        {/* Animated Marker Pen Stroke */}
+        {/* Marker Pen Stroke (Clean, no spring animation) */}
         <span
           aria-hidden="true"
-          className="absolute inset-y-[-2px] inset-x-[-4px] rounded-[4px] pointer-events-none transition-transform duration-200"
+          className="absolute inset-y-[-2px] inset-x-[-4px] rounded-[4px] pointer-events-none"
           style={{
             background: markerColor,
-            transformOrigin: isRtl ? 'right center' : 'left center',
-            transform: mounted && isActive ? 'scaleX(1)' : 'scaleX(0.15)',
-            transitionTimingFunction: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-            boxShadow: `0 1px 6px ${markerColor}40`,
+            boxShadow: `0 1px 4px ${markerColor}35`,
             zIndex: 0,
           }}
         />
         {/* Contrasting Text Content */}
         <span
-          className="relative z-10 transition-colors duration-150 font-bold"
+          className="relative z-10 font-bold transition-colors duration-100"
           style={{
             color: isActive ? highlightedTextColor : baseColor,
           }}

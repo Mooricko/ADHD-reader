@@ -10,7 +10,11 @@ import {
   Eye,
   AlignLeft,
   Puzzle,
-  Zap
+  Zap,
+  Sun,
+  Moon,
+  Timer,
+  BellOff
 } from 'lucide-react';
 import { ReaderSettings, ReaderViewMode } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
@@ -28,6 +32,10 @@ interface HeaderProps {
   onToggleFullscreen: () => void;
   currentTitle: string;
   isIdle?: boolean;
+  timerFormatted?: string;
+  isTimerRunning?: boolean;
+  isTimerSet?: boolean;
+  onOpenTimerModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,6 +51,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleFullscreen,
   currentTitle,
   isIdle = false,
+  timerFormatted = '00:00',
+  isTimerRunning = false,
+  isTimerSet = false,
+  onOpenTimerModal,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -111,6 +123,51 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Focus Timer Button */}
+          {onOpenTimerModal && (
+            <button
+              id="open-timer-modal-btn"
+              type="button"
+              onClick={onOpenTimerModal}
+              title={isTimerSet ? `Focus Session: ${timerFormatted} remaining (Click to configure)` : 'Start Focus Timer'}
+              aria-label="Focus Timer"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                isTimerSet
+                  ? `${highlight.bgBadge} border font-mono shadow-xs`
+                  : `${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface}`
+              }`}
+            >
+              <Timer className={`w-3.5 h-3.5 ${isTimerRunning ? 'animate-pulse text-red-500' : ''}`} />
+              <span className={isTimerSet ? 'font-mono' : 'hidden md:inline'}>
+                {isTimerSet ? timerFormatted : 'Timer'}
+              </span>
+              {isTimerSet && settings.doNotDisturb && (
+                <span title="Do Not Disturb Active">
+                  <BellOff className="w-3 h-3 text-red-400" />
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Dark / Light Mode Toggle Button */}
+          <button
+            id="toggle-dark-light-theme-btn"
+            type="button"
+            onClick={() => {
+              const nextTheme = settings.theme === 'light' ? 'midnight' : 'light';
+              onUpdateSettings({ theme: nextTheme });
+            }}
+            title={settings.theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            aria-label="Toggle Dark/Light Mode"
+            className={`p-2 rounded-lg border ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-colors`}
+          >
+            {settings.theme === 'light' ? (
+              <Moon className="w-4 h-4 text-slate-700" />
+            ) : (
+              <Sun className="w-4 h-4 text-amber-400" />
+            )}
+          </button>
+
           {/* Chrome Extension & Webpage Capture Hub */}
           <button
             id="open-extension-hub-btn"

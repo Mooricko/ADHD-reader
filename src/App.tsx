@@ -20,6 +20,7 @@ import { TextInputModal } from './components/TextInputModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ExtensionHubModal } from './components/ExtensionHubModal';
+import { FocusTimerModal } from './components/FocusTimerModal';
 import { safeStorage } from './utils/safeStorage';
 import { 
   isChromeExtensionEnvironment, 
@@ -52,6 +53,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   speechPitch: 1.0,
   speechVolume: 1.0,
   speechRateMultiplier: 1.0,
+  doNotDisturb: false,
 };
 
 const STORAGE_KEYS = {
@@ -76,6 +78,8 @@ export default function App() {
           if (!FONT_CONFIGS[merged.fontFamily as keyof typeof FONT_CONFIGS]) merged.fontFamily = DEFAULT_SETTINGS.fontFamily;
           if (typeof merged.wpm !== 'number' || isNaN(merged.wpm) || merged.wpm < 50) merged.wpm = DEFAULT_SETTINGS.wpm;
           if (typeof merged.fontSize !== 'number' || isNaN(merged.fontSize)) merged.fontSize = DEFAULT_SETTINGS.fontSize;
+          if (![1, 3, 5].includes(merged.chunkSize)) merged.chunkSize = 1;
+          if (typeof merged.doNotDisturb !== 'boolean') merged.doNotDisturb = false;
           return merged;
         }
       }
@@ -144,14 +148,100 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isExtensionHubOpen, setIsExtensionHubOpen] = useState(false);
+  const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
 
+  // 5. Reading Focus Timer & Sessions (Requirement 4 & 5)
+  const [timerSecondsRemaining, setTimerSecondsRemaining] = useState<number>(0);
+  const [initialTimerDuration, setInitialTimerDuration] = useState<number>(0);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [isTimerSet, setIsTimerSet] = useState(false);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Timer countdown effect
+  useEffect(() => {
+    if (isTimerRunning && timerSecondsRemaining > 0) {
+      timerIntervalRef.current = setInterval(() => {
+        setTimerSecondsRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerIntervalRef.current as NodeJS.Timeout);
+            setIsTimerRunning(false);
+            setIsTimerSet(false);
+            // Auto pause playback when session finishes
+            setIsPlaying(false);
+
+            // Notify user unless Do Not Disturb is enabled
+            if (!settings.doNotDisturb) {
+              setToastNotification('🎉 Focus reading session complete! Take a deep breath.');
+              setTimeout(() => setToastNotification(null), 5000);
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    }
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [isTimerRunning, timerSecondsRemaining, settings.doNotDisturb]);
+
+  // Show Toast with Do Not Disturb enforcement (Requirement 5)
   const showToast = useCallback((msg: string) => {
+    // When timer is set and Do Not Disturb is ON, suppress all notifications
+    if (isTimerSet && settings.doNotDisturb) {
+      return;
+    }
     setToastNotification(msg);
     setTimeout(() => {
       setToastNotification((curr) => (curr === msg ? null : curr));
     }, 4000);
+  }, [isTimerSet, settings.doNotDisturb]);
+
+  const handleStartTimer = useCallback((durationMinutes = 15) => {
+    const totalSecs = durationMinutes * 60;
+    setInitialTimerDuration(totalSecs);
+    setTimerSecondsRemaining(totalSecs);
+    setIsTimerSet(true);
+    setIsTimerRunning(true);
+    if (!settings.doNotDisturb) {
+      showToast(`⏱️ ${durationMinutes} min focus timer started`);
+    }
+  }, [settings.doNotDisturb, showToast]);
+
+  const handlePauseTimer = useCallback(() => {
+    setIsTimerRunning(false);
   }, []);
+
+  const handleResumeTimer = useCallback(() => {
+    if (timerSecondsRemaining > 0) {
+      setIsTimerRunning(true);
+    }
+  }, [timerSecondsRemaining]);
+
+  const handleResetTimer = useCallback(() => {
+    setIsTimerRunning(false);
+    setIsTimerSet(false);
+    setTimerSecondsRemaining(0);
+    setInitialTimerDuration(0);
+  }, []);
+
+  const handleAdjustTimer = useCallback((deltaSeconds: number) => {
+    setTimerSecondsRemaining((prev) => Math.max(10, prev + deltaSeconds));
+  }, []);
+
+  // Formatted Timer String for Header
+  const timerFormatted = useMemo(() => {
+    const m = Math.floor(timerSecondsRemaining / 60);
+    const s = timerSecondsRemaining % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }, [timerSecondsRemaining]);
 
   // Save settings on update
   const handleUpdateSettings = useCallback((updater: Partial<ReaderSettings>) => {
@@ -404,11 +494,16 @@ export default function App() {
       } else if (e.key === 'v' || e.key === 'V') {
         handleUpdateSettings({ speechNarration: !settings.speechNarration });
         showToast(!settings.speechNarration ? '🎙️ Voice-Over Narration Enabled' : '🔇 Voice-Over Narration Disabled');
+      } else if (e.key === 't' || e.key === 'T') {
+        setIsTimerModalOpen((prev) => !prev);
+      } else if (e.key === 'd' || e.key === 'D') {
+        handleUpdateSettings({ theme: settings.theme === 'light' ? 'midnight' : 'light' });
       } else if (e.code === 'Escape') {
         setIsTextInputOpen(false);
         setIsSettingsOpen(false);
         setIsShortcutsOpen(false);
         setIsExtensionHubOpen(false);
+        setIsTimerModalOpen(false);
       }
     };
 
@@ -420,15 +515,18 @@ export default function App() {
     handleRestart, 
     settings.wpm, 
     settings.metronomeSound, 
+    settings.speechNarration,
+    settings.theme,
     parsedWords.length, 
     currentIndex, 
-    handleUpdateSettings
+    handleUpdateSettings,
+    showToast
   ]);
 
   const [isIdle, setIsIdle] = useState(false);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen;
+  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen || isTimerModalOpen;
 
   const resetIdleTimer = useCallback(() => {
     setIsIdle(false);
@@ -500,6 +598,10 @@ export default function App() {
           onToggleFullscreen={handleToggleFullscreen}
           currentTitle={currentTitle}
           isIdle={isIdle}
+          timerFormatted={timerFormatted}
+          isTimerRunning={isTimerRunning}
+          isTimerSet={isTimerSet}
+          onOpenTimerModal={() => setIsTimerModalOpen(true)}
         />
       )}
 
@@ -566,12 +668,32 @@ export default function App() {
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
         onResetDefaults={handleResetDefaults}
+        onOpenTimerModal={() => setIsTimerModalOpen(true)}
       />
 
       <KeyboardShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
         settings={settings}
+      />
+
+      {/* Focus Session Timer Modal (Requirement 4 & 5) */}
+      <FocusTimerModal
+        isOpen={isTimerModalOpen}
+        onClose={() => setIsTimerModalOpen(false)}
+        secondsRemaining={timerSecondsRemaining}
+        initialDurationSeconds={initialTimerDuration}
+        isRunning={isTimerRunning}
+        isSet={isTimerSet}
+        onStart={handleStartTimer}
+        onPause={handlePauseTimer}
+        onResume={handleResumeTimer}
+        onReset={handleResetTimer}
+        onAdjustTime={handleAdjustTimer}
+        doNotDisturb={settings.doNotDisturb}
+        onToggleDoNotDisturb={(dnd) => handleUpdateSettings({ doNotDisturb: dnd })}
+        theme={currentThemeConfig}
+        highlightHex={HIGHLIGHT_COLORS[settings.highlightColor]?.hex || '#ef4444'}
       />
     </div>
   );

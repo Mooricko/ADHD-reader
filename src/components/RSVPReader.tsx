@@ -127,6 +127,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
 
       const currIdx = currentIndexRef.current;
       const allWords = wordsRef.current;
+      const step = settingsRef.current.chunkSize || 1;
 
       if (currIdx >= allWords.length - 1) {
         // Reached the end of text!
@@ -141,7 +142,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         return;
       }
 
-      const nextIdx = currIdx + 1;
+      // Always advance word-by-word so the vertical reel swipes to each word smoothly
+      const nextIdx = Math.min(allWords.length - 1, currIdx + 1);
       onIndexChangeRef.current(nextIdx);
 
       // Play subtle metronome tick if enabled
@@ -150,21 +152,25 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         metronome.playTick(settingsRef.current.metronomeVolume, nextWord?.hasSentenceEnd);
       }
 
-      const currentWord = allWords[nextIdx];
-      const delay = calculateWordDelayMs(
-        currentWord,
+      // Calculate duration for this word
+      let wordDelay = calculateWordDelayMs(
+        allWords[nextIdx],
         settingsRef.current.wpm,
         settingsRef.current.smartPunctuationPause
       );
+      if (wordDelay <= 0) {
+        wordDelay = (60 / settingsRef.current.wpm) * 1000;
+      }
 
-      timerRef.current = setTimeout(scheduleNextWord, delay);
+      timerRef.current = setTimeout(scheduleNextWord, wordDelay);
     };
 
     // Calculate initial delay for the first word
     const currentWord = words[currentIndexRef.current] || words[0];
-    const initialDelay = currentWord
-      ? calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause)
-      : (60 / settings.wpm) * 1000;
+    let initialDelay = calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause);
+    if (initialDelay <= 0) {
+      initialDelay = (60 / settings.wpm) * 1000;
+    }
 
     if (settings.metronomeSound && currentWord) {
       metronome.playTick(settings.metronomeVolume, currentWord.hasSentenceEnd);
@@ -300,8 +306,36 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           </span>
         </div>
 
-        {/* Word Size Controller, Morph Transition Toggle & Speed Indicator Badge */}
+        {/* Word Size, Words per flash, Morph Toggle & Speed */}
         <div className="flex items-center gap-2">
+          {/* Words per Flash (1, 3, 5 words in RSVP mode) */}
+          <div 
+            id="rsvp-word-count-selector"
+            className={`flex items-center rounded-lg border ${theme.borderClass} ${theme.cardBgClass} p-0.5 text-xs font-mono`}
+            title="RSVP Words shown per flash: 1, 3, or 5 words"
+          >
+            {([1, 3, 5] as const).map((count) => {
+              const isSelected = (settings.chunkSize || 1) === count;
+              return (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => onUpdateSettings({ chunkSize: count })}
+                  title={`Show ${count} ${count === 1 ? 'word' : 'words'} per flash`}
+                  aria-label={`Show ${count} words per flash`}
+                  className={`px-2 py-0.5 rounded font-bold transition-all ${
+                    isSelected
+                      ? 'text-white shadow-xs'
+                      : `${theme.textMuted} hover:${theme.textPrimary}`
+                  }`}
+                  style={isSelected ? { backgroundColor: highlight.hex } : undefined}
+                >
+                  {count}w
+                </button>
+              );
+            })}
+          </div>
+
           {/* Word Size Controller */}
           <div className={`flex items-center rounded-lg border ${theme.borderClass} ${theme.cardBgClass} p-0.5 text-xs font-mono`}>
             <button
@@ -432,15 +466,17 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               </div>
             )}
 
-            {/* Word Display Box with Liquid Text Morph Transition */}
+            {/* Word Display Box with Liquid Text Morph Transition & Vertical Looping Reel */}
             <RSVPMorphWord
               currentWord={currentWord}
               currentIndex={currentIndex}
+              allWords={words}
               isPlaying={isPlaying}
               settings={settings}
               theme={theme}
               highlight={highlight}
               font={font}
+              onIndexChange={onIndexChange}
             />
           </div>
         )}

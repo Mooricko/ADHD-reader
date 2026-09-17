@@ -25,7 +25,7 @@ export interface HighlightedWordParts {
 
 export interface ReaderSettings {
   wpm: number;
-  chunkSize: 1 | 2 | 3;
+  chunkSize: 1 | 3 | 5; // 1, 3, or 5 words shown in RSVP mode
   highlightColor: HighlightColor;
   highlightStyle: HighlightStyle;
   theme: ThemeId;
@@ -47,6 +47,7 @@ export interface ReaderSettings {
   speechPitch: number; // 0.5 to 1.5 (default 1.0)
   speechVolume: number; // 0 to 1 (default 1.0)
   speechRateMultiplier: number; // Fine-tuning rate multiplier (0.7 to 1.3, default 1.0)
+  doNotDisturb: boolean; // Turns off all notifications when timer is set
 }
 
 export interface SavedDocument {

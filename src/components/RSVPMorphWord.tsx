@@ -3,15 +3,18 @@ import { HighlightedWordParts, ReaderSettings } from '../types';
 import { ThemeConfig } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { SvgFilters } from './MorphingText';
+import { HorizontalRSVPReel } from './HorizontalRSVPReel';
 
 interface RSVPMorphWordProps {
   currentWord: HighlightedWordParts;
   currentIndex: number;
+  allWords?: HighlightedWordParts[];
   isPlaying: boolean;
   settings: ReaderSettings;
   theme: ThemeConfig;
   highlight: { hex: string; bgBadge: string };
   font: { className: string };
+  onIndexChange?: (index: number) => void;
 }
 
 interface StoredWordState {
@@ -58,11 +61,13 @@ const easeInOutCubic = easeInOut;
 export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
   currentWord,
   currentIndex,
+  allWords = [],
   isPlaying,
   settings,
   theme,
   highlight,
   font,
+  onIndexChange,
 }) => {
   // Refs for standard RSVP display
   const standardWordRef = useRef<HTMLDivElement>(null);
@@ -260,6 +265,23 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
   const fadeDurationMs = isPlaying
     ? Math.min(130, Math.max(50, standardDelay * 0.25))
     : 160;
+
+  // Case 0: Multi-Word Horizontal Looping Reel (1, 3, or 5 Words Aligned Horizontally with GSAP Swipe)
+  if (settings.chunkSize && settings.chunkSize > 1) {
+    return (
+      <HorizontalRSVPReel
+        words={allWords && allWords.length > 0 ? allWords : [currentWord]}
+        currentIndex={currentIndex}
+        chunkSize={settings.chunkSize as 1 | 3 | 5}
+        isPlaying={isPlaying}
+        settings={settings}
+        theme={theme}
+        highlight={highlight}
+        font={font}
+        onIndexChange={onIndexChange}
+      />
+    );
+  }
 
   // Case 1: Standard RSVP Mode (Comfortable CSS Fade-In Animation)
   if (!settings.morphTransition) {

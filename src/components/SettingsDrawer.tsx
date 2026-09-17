@@ -15,7 +15,12 @@ import {
   Headphones,
   Mic,
   Play,
-  PlayCircle
+  PlayCircle,
+  Sun,
+  Moon,
+  Timer,
+  BellOff,
+  Bell
 } from 'lucide-react';
 import { 
   ReaderSettings, 
@@ -37,6 +42,7 @@ interface SettingsDrawerProps {
   settings: ReaderSettings;
   onUpdateSettings: (updater: Partial<ReaderSettings>) => void;
   onResetDefaults: () => void;
+  onOpenTimerModal?: () => void;
 }
 
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
@@ -45,6 +51,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   settings,
   onUpdateSettings,
   onResetDefaults,
+  onOpenTimerModal,
 }) => {
   const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
@@ -198,12 +205,54 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
             </div>
           </div>
 
-          {/* 3. Theme Selector */}
+          {/* 3. Theme Selector & Dark/Light Mode */}
           <div className="space-y-2.5">
-            <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
-              Color Theme & Contrast
-            </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center justify-between">
+              <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                Color Mode & Theme
+              </label>
+              <span className={`text-[11px] font-mono ${theme.textMuted}`}>
+                {settings.theme === 'light' ? 'Light Mode' : 'Dark Mode'}
+              </span>
+            </div>
+
+            {/* Dark / Light Mode Segmented Toggle */}
+            <div className={`grid grid-cols-2 p-1 rounded-xl border ${theme.borderClass} ${theme.accentSurface} gap-1`}>
+              <button
+                type="button"
+                id="settings-dark-mode-btn"
+                onClick={() => {
+                  if (settings.theme === 'light') {
+                    onUpdateSettings({ theme: 'midnight' });
+                  }
+                }}
+                className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-all ${
+                  settings.theme !== 'light'
+                    ? 'bg-slate-900 text-white shadow-xs border border-white/10'
+                    : `${theme.textMuted} hover:${theme.textPrimary}`
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5 text-amber-400" />
+                <span>Dark Mode</span>
+              </button>
+
+              <button
+                type="button"
+                id="settings-light-mode-btn"
+                onClick={() => onUpdateSettings({ theme: 'light' })}
+                className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-all ${
+                  settings.theme === 'light'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                    : `${theme.textMuted} hover:${theme.textPrimary}`
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>Light Mode</span>
+              </button>
+            </div>
+
+            {/* Palette Presets */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
               {(Object.keys(THEME_CONFIGS) as ThemeId[]).map((themeKey) => {
                 const thm = THEME_CONFIGS[themeKey];
                 const isSelected = settings.theme === themeKey;
@@ -315,8 +364,49 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           {/* 6. Focus & Optical Alignment Controls */}
           <div className="space-y-3 pt-2 border-t border-slate-700/30">
             <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
-              Focus Guides & Anchors
+              Focus Guides & RSVP Chunks
             </label>
+
+            {/* Words per Flash (1, 3, or 5 Words) */}
+            <div className={`p-3 rounded-xl border ${theme.borderClass} ${theme.accentSurface} space-y-2`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className={`text-xs font-semibold ${theme.textPrimary}`}>
+                    RSVP Words Per Flash
+                  </div>
+                  <div className={`text-[11px] ${theme.textMuted}`}>
+                    Choose 1, 3, or 5 words shown at once with smooth transitions
+                  </div>
+                </div>
+                <span className="font-mono text-xs font-bold text-red-500">
+                  {settings.chunkSize || 1} {settings.chunkSize === 1 ? 'word' : 'words'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                {([1, 3, 5] as const).map((count) => {
+                  const isSelected = (settings.chunkSize || 1) === count;
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => onUpdateSettings({ chunkSize: count })}
+                      className={`py-2 px-1 rounded-xl border text-xs font-bold transition-all flex flex-col items-center justify-center ${
+                        isSelected
+                          ? `${highlight.bgBadge} border shadow-xs`
+                          : `${theme.borderClass} bg-black/20 ${theme.textMuted} hover:${theme.textPrimary}`
+                      }`}
+                      style={isSelected ? { borderColor: highlight.hex, color: highlight.hex } : undefined}
+                    >
+                      <span className="text-sm">{count}</span>
+                      <span className="text-[10px] opacity-75 font-normal">
+                        {count === 1 ? 'Single' : count === 3 ? 'Triad' : 'Clause'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* Paragraph Focus Blur Toggle */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
@@ -335,6 +425,47 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 onChange={(e) => onUpdateSettings({ focusParagraphBlur: e.target.checked })}
                 className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
               />
+            </div>
+
+            {/* RSVP Words Shown & Horizontal Reel Mode */}
+            <div className="p-3 rounded-xl border border-white/5 bg-black/10 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className={`text-xs font-semibold ${theme.textPrimary}`}>
+                    RSVP Words Shown (Horizontal Swipe Reel)
+                  </div>
+                  <div className={`text-[11px] ${theme.textMuted}`}>
+                    Aligns last, current, and next words horizontally and swipes as voice reads
+                  </div>
+                </div>
+                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-400">
+                  {settings.chunkSize || 1} {settings.chunkSize === 1 ? 'word' : 'words'}
+                </span>
+              </div>
+
+              <div className={`grid grid-cols-3 p-1 rounded-xl border ${theme.borderClass} ${theme.accentSurface} gap-1`}>
+                {([1, 3, 5] as const).map((count) => {
+                  const isSelected = (settings.chunkSize || 1) === count;
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => onUpdateSettings({ chunkSize: count })}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all flex flex-col items-center justify-center gap-0.5 ${
+                        isSelected
+                          ? 'text-white shadow-xs'
+                          : `${theme.textMuted} hover:${theme.textPrimary}`
+                      }`}
+                      style={isSelected ? { backgroundColor: highlight.hex } : undefined}
+                    >
+                      <span className="font-bold">{count} {count === 1 ? 'Word' : 'Words'}</span>
+                      <span className="text-[9px] opacity-80 font-normal">
+                        {count === 1 ? 'Single' : count === 3 ? 'Last / Now / Next' : '5 Words Reel'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Optical Center Lock */}
@@ -620,6 +751,63 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 8. Focus Timer & Do Not Disturb */}
+          <div className="space-y-3 pt-2 border-t border-slate-700/30">
+            <div className="flex items-center justify-between">
+              <label className={`block text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                Focus Sessions & Do Not Disturb
+              </label>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                ADHD Flow
+              </span>
+            </div>
+
+            {/* Do Not Disturb Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
+              <div className="flex items-center gap-2.5 pr-2">
+                <div className={`p-2 rounded-lg ${settings.doNotDisturb ? 'bg-red-500/20 text-red-400' : 'bg-white/5 text-slate-400'}`}>
+                  {settings.doNotDisturb ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                </div>
+                <div>
+                  <div className={`text-xs font-semibold ${theme.textPrimary} flex items-center gap-1.5`}>
+                    <span>Do Not Disturb During Timer</span>
+                    {settings.doNotDisturb && (
+                      <span className="text-[10px] px-1 rounded bg-red-500/20 text-red-400 font-mono font-bold">
+                        ON
+                      </span>
+                    )}
+                  </div>
+                  <div className={`text-[11px] ${theme.textMuted}`}>
+                    Silences all toast popups, alerts, and sound effects while focus timer is running
+                  </div>
+                </div>
+              </div>
+              <input
+                id="toggle-dnd-settings"
+                type="checkbox"
+                checked={settings.doNotDisturb}
+                onChange={(e) => onUpdateSettings({ doNotDisturb: e.target.checked })}
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0 shrink-0"
+              />
+            </div>
+
+            {/* Open Focus Timer Button */}
+            {onOpenTimerModal && (
+              <button
+                id="drawer-open-timer-btn"
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenTimerModal();
+                }}
+                className={`w-full flex items-center justify-center gap-2 p-2.5 rounded-xl border ${theme.borderClass} ${theme.accentSurface} ${theme.textPrimary} hover:border-red-500/40 text-xs font-semibold transition-all shadow-xs`}
+              >
+                <Timer className="w-4 h-4 text-red-500" />
+                <span>Open Reading Focus Timer & Sessions</span>
+              </button>
+            )}
           </div>
         </div>
 

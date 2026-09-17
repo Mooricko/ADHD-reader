@@ -192,12 +192,16 @@ export function getHighlight(colorId?: string): typeof HIGHLIGHT_COLORS['red'] {
 }
 
 /**
- * Safe Font Getter with fallback to 'lexend'
+ * Check if the theme is dark
  */
-export function getFont(fontId?: string): typeof FONT_CONFIGS['lexend'] {
-  if (fontId && fontId in FONT_CONFIGS) {
-    return FONT_CONFIGS[fontId as FontFamily];
-  }
-  return FONT_CONFIGS.lexend;
+export function isDarkTheme(themeId: ThemeId): boolean {
+  return themeId !== 'light';
+}
+
+/**
+ * Toggle between Dark and Light mode
+ */
+export function toggleDarkLightTheme(currentTheme: ThemeId): ThemeId {
+  return currentTheme === 'light' ? 'midnight' : 'light';
 }
 
