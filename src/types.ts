@@ -49,6 +49,7 @@ export interface ReaderSettings {
   speechRateMultiplier: number; // Fine-tuning rate multiplier (0.7 to 1.3, default 1.0)
   doNotDisturb: boolean; // Turns off all notifications when timer is set
   showHeatmapProgress: boolean; // Visual reading progress indicator with color gradient heatmap for complex sections
+  smartAutoPause: boolean; // Auto-pauses RSVP reader when mouse leaves window or window loses focus
 }
 
 export type ComplexityLevel = 'unread' | 'low' | 'moderate' | 'high' | 'peak';
@@ -129,4 +130,34 @@ export interface SavedDocument {
   lastReadIndex: number;
   lastReadDate: string;
   category?: string;
+}
+
+export type InputSourceType = 'text' | 'url' | 'txt' | 'markdown' | 'pdf';
+
+export interface ReaderDocument {
+  id: string;
+  sourceType: InputSourceType;
+  title?: string;
+  sourceUrl?: string;
+  fileName?: string;
+  content: string;
+  language?: string;
+  direction?: 'ltr' | 'rtl';
+  metadata?: {
+    author?: string;
+    pageCount?: number;
+    wordCount?: number;
+  };
+}
+
+export type ImportStage = 'idle' | 'detecting' | 'reading' | 'extracting' | 'preparing' | 'ready' | 'error';
+
+export interface ImportState {
+  stage: ImportStage;
+  message?: string;
+  progress?: number; // 0 to 100
+  error?: string;
+  errorAction?: 'retry' | 'paste' | 'another_file';
+  detectedType?: InputSourceType;
+  document?: ReaderDocument;
 }

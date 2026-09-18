@@ -20,7 +20,9 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
 
   const shortcuts = [
-    { key: 'Space', desc: 'Play / Pause reader' },
+    { key: 'Space', desc: 'Play / Pause reader (or resume after Smart Auto-Pause)' },
+    { key: 'Ctrl/Cmd + O', desc: 'Open Universal Text Input Hub' },
+    { key: 'Ctrl/Cmd + V', desc: 'Paste / Import clipboard text or URL' },
     { key: '← Left Arrow', desc: 'Rewind 10 words' },
     { key: '→ Right Arrow', desc: 'Jump forward 10 words' },
     { key: '↑ Up Arrow', desc: 'Increase reading speed (+25 WPM)' },

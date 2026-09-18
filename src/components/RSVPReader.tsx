@@ -28,6 +28,7 @@ import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { RSVPMorphWord } from './RSVPMorphWord';
 import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
+import { AutoPauseReason } from '../hooks/useSmartAutoPause';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -42,6 +43,9 @@ interface RSVPReaderProps {
   heatmapData?: ReadingHeatmapData;
   onResetHeatmap?: () => void;
   onOpenStatsModal?: () => void;
+  isAutoPaused?: boolean;
+  autoPauseReason?: AutoPauseReason | null;
+  onResume?: () => void;
 }
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
@@ -57,6 +61,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   heatmapData,
   onResetHeatmap,
   onOpenStatsModal,
+  isAutoPaused = false,
+  autoPauseReason = null,
+  onResume,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -511,6 +518,43 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           isIdle ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
+        {/* Smart Auto-Pause Active Banner */}
+        {isAutoPaused && !isPlaying && (
+          <div
+            id="smart-auto-pause-indicator"
+            onClick={onResume || onTogglePlay}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onResume ? onResume() : onTogglePlay();
+              }
+            }}
+            className="mb-3 px-3.5 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-3 cursor-pointer transition-all animate-in fade-in duration-200"
+            title="Click to resume reading"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex h-2 w-2 relative shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              </span>
+              <span className="font-semibold shrink-0">Smart Auto-Paused</span>
+              <span className="text-amber-400/50 hidden sm:inline">•</span>
+              <span className="text-amber-200/80 truncate text-[11px] sm:text-xs">
+                {autoPauseReason === 'mouse'
+                  ? 'Cursor moved outside the reading window'
+                  : 'Window lost focus (tab switch)'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0 font-medium text-[11px] sm:text-xs text-amber-200 bg-amber-500/20 px-2 py-0.5 rounded-lg hover:bg-amber-500/30 transition-colors">
+              <span>Resume</span>
+              <kbd className="px-1.5 py-0.2 rounded bg-black/40 text-[10px] font-mono text-amber-100">Space</kbd>
+            </div>
+          </div>
+        )}
+
         {/* Timeline Scrubber / Reading Complexity Heatmap */}
         <div className="mb-4">
           {settings.showHeatmapProgress !== false && heatmapData ? (

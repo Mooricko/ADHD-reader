@@ -525,6 +525,28 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               />
             </div>
 
+            {/* Smart Auto-Pause */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
+              <div>
+                <div className={`text-xs font-semibold ${theme.textPrimary} flex items-center gap-1.5`}>
+                  <span>Smart Auto-Pause</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-medium">
+                    ADHD Shield
+                  </span>
+                </div>
+                <div className={`text-[11px] ${theme.textMuted}`}>
+                  Pauses RSVP when mouse leaves window or tab loses focus
+                </div>
+              </div>
+              <input
+                id="toggle-smart-auto-pause"
+                type="checkbox"
+                checked={settings.smartAutoPause !== false}
+                onChange={(e) => onUpdateSettings({ smartAutoPause: e.target.checked })}
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
+              />
+            </div>
+
             {/* Reading Complexity Heatmap */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
               <div>

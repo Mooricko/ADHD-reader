@@ -29,7 +29,8 @@ import {
   clearStoredCapturedText 
 } from './utils/extensionBridge';
 import { useReadingHeatmap } from './hooks/useReadingHeatmap';
-import { CheckCircle2, Zap } from 'lucide-react';
+import { useSmartAutoPause, AutoPauseReason } from './hooks/useSmartAutoPause';
+import { CheckCircle2, Zap, Upload } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
   wpm: 320,
@@ -57,6 +58,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   speechRateMultiplier: 1.0,
   doNotDisturb: false,
   showHeatmapProgress: true,
+  smartAutoPause: true,
 };
 
 const STORAGE_KEYS = {
@@ -90,6 +92,7 @@ export default function App() {
           }
           if (typeof merged.doNotDisturb !== 'boolean') merged.doNotDisturb = false;
           if (typeof merged.showHeatmapProgress !== 'boolean') merged.showHeatmapProgress = true;
+          if (typeof merged.smartAutoPause !== 'boolean') merged.smartAutoPause = true;
           return merged;
         }
       }
@@ -242,6 +245,56 @@ export default function App() {
       setToastNotification((curr) => (curr === msg ? null : curr));
     }, 4000);
   }, [isTimerSet, settings.doNotDisturb]);
+
+  // 6. Window-level Drag & Drop for Universal Input Hub
+  const [isWindowDragging, setIsWindowDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  useEffect(() => {
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current += 1;
+      if (e.dataTransfer?.types?.includes('Files')) {
+        setIsWindowDragging(true);
+      }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current -= 1;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setIsWindowDragging(false);
+      }
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+      setIsWindowDragging(false);
+
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        setIsTextInputOpen(true);
+      }
+    };
+
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, []);
 
   const handleStartTimer = useCallback((durationMinutes = 15) => {
     const totalSecs = durationMinutes * 60;
@@ -440,6 +493,8 @@ export default function App() {
 
   // Save index on change
   const handleIndexChange = useCallback((newIdx: number) => {
+    setIsAutoPaused(false);
+    setAutoPauseReason(null);
     const validIdx = Math.max(0, isNaN(newIdx) || !isFinite(newIdx) ? 0 : Math.floor(newIdx));
     setCurrentIndex(validIdx);
     try {
@@ -459,7 +514,28 @@ export default function App() {
     parsedWordsLengthRef.current = parsedWords.length;
   }, [parsedWords.length]);
 
+  // Smart Auto-Pause state
+  const [isAutoPaused, setIsAutoPaused] = useState(false);
+  const [autoPauseReason, setAutoPauseReason] = useState<AutoPauseReason | null>(null);
+
+  const handleAutoPause = useCallback((reason: AutoPauseReason) => {
+    setIsPlaying(false);
+    setIsAutoPaused(true);
+    setAutoPauseReason(reason);
+    const reasonText = reason === 'mouse' ? 'cursor left window' : 'window lost focus';
+    showToast(`⏸️ Smart Auto-Paused (${reasonText})`);
+  }, [showToast]);
+
+  // Hook for Smart Auto-Pause
+  useSmartAutoPause({
+    isPlaying,
+    enabled: settings.smartAutoPause !== false,
+    onAutoPause: handleAutoPause,
+  });
+
   const handleTogglePlay = useCallback(() => {
+    setIsAutoPaused(false);
+    setAutoPauseReason(null);
     setIsPlaying((prev) => {
       if (!prev && currentIndexRef.current >= parsedWordsLengthRef.current - 1) {
         handleIndexChange(0);
@@ -470,6 +546,8 @@ export default function App() {
   }, [handleIndexChange]);
 
   const handleRestart = useCallback(() => {
+    setIsAutoPaused(false);
+    setAutoPauseReason(null);
     setIsPlaying(false);
     handleIndexChange(0);
   }, [handleIndexChange]);
@@ -504,6 +582,19 @@ export default function App() {
         target.tagName === 'TEXTAREA' || 
         target.isContentEditable
       ) {
+        return;
+      }
+
+      // Universal Input Hub Shortcuts
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        setIsTextInputOpen(true);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        setIsTextInputOpen(true);
         return;
       }
 
@@ -674,6 +765,9 @@ export default function App() {
             heatmapData={heatmapData}
             onResetHeatmap={resetHeatmap}
             onOpenStatsModal={() => setIsStatsModalOpen(true)}
+            isAutoPaused={isAutoPaused}
+            autoPauseReason={autoPauseReason}
+            onResume={handleTogglePlay}
           />
         ) : (
           <FlowReader
@@ -784,6 +878,31 @@ export default function App() {
         currentDocumentTitle={currentTitle}
         onClearStats={clearAllStats}
       />
+
+      {/* Global Drag & Drop Overlay */}
+      {isWindowDragging && (
+        <div 
+          id="window-drag-overlay"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 pointer-events-none animate-in fade-in duration-150"
+        >
+          <div className="p-8 rounded-3xl border-2 border-dashed border-red-500 bg-red-500/10 text-center max-w-md shadow-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-red-500 text-white flex items-center justify-center mx-auto mb-4 shadow-lg shadow-red-500/30">
+              <Upload className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Drop to Import into ADHD Reader</h2>
+            <p className="text-sm text-slate-300 mb-4">
+              Release your TXT, Markdown, or PDF document to start reading immediately
+            </p>
+            <div className="flex items-center justify-center gap-3 text-xs font-mono text-slate-400">
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">TXT</span>
+              <span>•</span>
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">MD</span>
+              <span>•</span>
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">PDF</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
