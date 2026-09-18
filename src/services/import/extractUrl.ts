@@ -1,5 +1,6 @@
-import { ReaderDocument } from '../../types';
-import { normalizeText, detectTextDirection, countWords } from '../../utils/normalizeText';
+import { ReaderDocument, UrlPreviewData } from '../../types';
+import { normalizeText, detectTextDirection, countWords, extractSuggestedTitle } from '../../utils/normalizeText';
+import { markdownToReadableText } from './extractMarkdown';
 
 export type UrlProgressCallback = (progressPercent: number, statusMessage: string) => void;
 
@@ -153,71 +154,166 @@ export function parseHtmlArticle(html: string, originalUrl?: string): { title: s
 }
 
 /**
+ * Checks if a URL points to a Wikipedia article and parses language & title.
+ */
+export function isWikipediaUrl(url: string): { lang: string; title: string } | null {
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    const host = parsed.hostname.toLowerCase();
+    const match = host.match(/^([a-z0-9_-]+)\.wikipedia\.org$/);
+    if (match) {
+      const pathParts = parsed.pathname.split('/');
+      const wikiIdx = pathParts.indexOf('wiki');
+      if (wikiIdx !== -1 && pathParts[wikiIdx + 1]) {
+        return {
+          lang: match[1],
+          title: decodeURIComponent(pathParts[wikiIdx + 1]),
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
  * Fetches and extracts readable text from a URL.
  */
 export async function extractUrl(
   urlInput: string,
-  onProgress?: UrlProgressCallback
+  onProgress?: UrlProgressCallback,
+  signal?: AbortSignal
 ): Promise<ReaderDocument> {
   const url = formatValidUrl(urlInput);
+
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
 
   onProgress?.(15, 'Connecting to website...');
 
   let html = '';
+  let markdownText = '';
   let fetchSuccessful = false;
 
-  // Attempt 1: Direct fetch with 8s timeout
-  try {
+  // Helper to fetch with timeout and external signal propagation
+  const fetchWithTimeout = async (targetUrl: string, timeoutMs: number, headers?: Record<string, string>) => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const onExternalAbort = () => controller.abort();
+    if (signal) signal.addEventListener('abort', onExternalAbort, { once: true });
 
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-    });
-    clearTimeout(timeoutId);
-
-    if (res.ok) {
-      html = await res.text();
-      fetchSuccessful = true;
-    }
-  } catch {
-    // Direct fetch failed (likely CORS in browser preview), proceed to proxy
-  }
-
-  // Attempt 2: CORS Proxy 1 (AllOrigins)
-  if (!fetchSuccessful) {
     try {
-      onProgress?.(40, 'Extracting via web reader proxy...');
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const res = await fetch(proxyUrl, { signal: controller.signal });
+      const res = await fetch(targetUrl, {
+        signal: controller.signal,
+        headers,
+      });
       clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onExternalAbort);
+      return res;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onExternalAbort);
+      throw err;
+    }
+  };
 
+  // Step 1: Special optimization for Wikipedia (native CORS, ad-free clean HTML)
+  const wikiInfo = isWikipediaUrl(url);
+  if (wikiInfo) {
+    try {
+      onProgress?.(30, 'Extracting Wikipedia article...');
+      const wikiApiUrl = `https://${wikiInfo.lang}.wikipedia.org/api/rest_v1/page/html/${encodeURIComponent(wikiInfo.title)}`;
+      const res = await fetchWithTimeout(wikiApiUrl, 7000, {
+        'Api-User-Agent': 'ADHDReader/1.0',
+      });
       if (res.ok) {
         html = await res.text();
         fetchSuccessful = true;
       }
     } catch {
-      // Proxy 1 failed
+      // Fall through to standard extraction
     }
   }
 
-  // Attempt 3: CORS Proxy 2 (corsproxy.io)
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // Step 2: Internal server extraction endpoint (bypasses browser CORS completely)
   if (!fetchSuccessful) {
     try {
-      onProgress?.(60, 'Trying alternate connection...');
+      onProgress?.(35, 'Fetching article text...');
+      const serverApiUrl = `/api/extract-url?url=${encodeURIComponent(url)}`;
+      const res = await fetchWithTimeout(serverApiUrl, 9000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.html) {
+          html = data.html;
+          fetchSuccessful = true;
+        } else if (data.markdown) {
+          markdownText = data.markdown;
+          fetchSuccessful = true;
+        }
+      }
+    } catch {
+      // Server endpoint unavailable (e.g. static extension or offline), continue to fallbacks
+    }
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // Step 3: Direct browser fetch (works if the target site allows CORS)
+  if (!fetchSuccessful) {
+    try {
+      onProgress?.(50, 'Contacting host directly...');
+      const res = await fetchWithTimeout(url, 4000, {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      });
+      if (res.ok) {
+        html = await res.text();
+        fetchSuccessful = true;
+      }
+    } catch {
+      // Direct fetch blocked by browser CORS policy
+    }
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // Step 4: CORS Proxy 1 (AllOrigins JSON proxy)
+  if (!fetchSuccessful) {
+    try {
+      onProgress?.(65, 'Reading via web proxy...');
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+      const res = await fetchWithTimeout(proxyUrl, 5000);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.contents) {
+          html = json.contents;
+          fetchSuccessful = true;
+        }
+      }
+    } catch {
+      // Proxy 1 failed or timed out
+    }
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // Step 5: CORS Proxy 2 (corsproxy.io)
+  if (!fetchSuccessful) {
+    try {
+      onProgress?.(80, 'Trying alternate proxy...');
       const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const res = await fetch(proxyUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
+      const res = await fetchWithTimeout(proxyUrl, 5000);
       if (res.ok) {
         html = await res.text();
         fetchSuccessful = true;
@@ -227,11 +323,36 @@ export async function extractUrl(
     }
   }
 
-  if (!fetchSuccessful || !html) {
-    throw new Error("Couldn't extract this page. The website may block remote access or require login.");
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
   }
 
-  onProgress?.(80, 'Cleaning article text...');
+  if (!fetchSuccessful || (!html && !markdownText)) {
+    throw new Error("Couldn't extract this page. The website may block remote access, require login, or be behind a paywall.");
+  }
+
+  // If we received markdown (from reader API):
+  if (markdownText) {
+    onProgress?.(85, 'Cleaning article text...');
+    const content = markdownToReadableText(markdownText);
+    const title = extractSuggestedTitle(content) || (wikiInfo ? wikiInfo.title.replace(/_/g, ' ') : 'Imported Article');
+    const wordCount = countWords(content);
+    const direction = detectTextDirection(content);
+
+    return {
+      id: `url_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      sourceType: 'url',
+      title,
+      sourceUrl: url,
+      content,
+      direction,
+      metadata: {
+        wordCount,
+      },
+    };
+  }
+
+  onProgress?.(85, 'Cleaning article text...');
   const { title, content, author } = parseHtmlArticle(html, url);
 
   onProgress?.(95, 'Preparing reader document...');
@@ -241,7 +362,7 @@ export async function extractUrl(
   return {
     id: `url_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     sourceType: 'url',
-    title,
+    title: title || (wikiInfo ? wikiInfo.title.replace(/_/g, ' ') : 'Imported Article'),
     sourceUrl: url,
     content,
     direction,
@@ -249,5 +370,49 @@ export async function extractUrl(
       author,
       wordCount,
     },
+  };
+}
+
+/**
+ * Quick preview fetcher: Extracts title, word count, estimated reading duration,
+ * domain, and short excerpt before the user commits to the full import.
+ * Keeps the full ReaderDocument preloaded so subsequent import is instant.
+ */
+export async function fetchUrlPreview(
+  urlInput: string,
+  wpm: number = 300,
+  signal?: AbortSignal
+): Promise<UrlPreviewData> {
+  const doc = await extractUrl(urlInput, undefined, signal);
+  const wordCount = doc.metadata?.wordCount || countWords(doc.content);
+  const readingSpeed = Math.max(50, wpm || 300);
+  const estimatedMinutes = Math.max(1, Math.round((wordCount / readingSpeed) * 10) / 10);
+
+  let domain = '';
+  try {
+    const parsed = new URL(doc.sourceUrl || urlInput);
+    domain = parsed.hostname.replace(/^www\./, '');
+  } catch {
+    domain = urlInput.replace(/^https?:\/\//, '').split('/')[0];
+  }
+
+  // Extract a clean 1-2 sentence excerpt from the first substantial paragraph
+  const paragraphs = doc.content
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 25 && !p.startsWith('•'));
+
+  const leadText = paragraphs[0] || doc.content;
+  const excerpt = leadText.length > 150 ? `${leadText.slice(0, 147).trim()}...` : leadText;
+
+  return {
+    url: doc.sourceUrl || urlInput,
+    title: doc.title || 'Untitled Article',
+    wordCount,
+    estimatedMinutes,
+    domain,
+    author: doc.metadata?.author,
+    excerpt,
+    document: doc,
   };
 }

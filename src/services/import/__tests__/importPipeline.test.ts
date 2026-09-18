@@ -13,7 +13,7 @@ import { normalizeText, detectTextDirection, countWords, extractSuggestedTitle }
 import { detectInputType, isUrlString, isMarkdownString, getFileExtension } from '../detectInput';
 import { markdownToReadableText, extractMarkdown } from '../extractMarkdown';
 import { extractTxt } from '../extractTxt';
-import { parseHtmlArticle, formatValidUrl } from '../extractUrl';
+import { parseHtmlArticle, formatValidUrl, fetchUrlPreview, isWikipediaUrl } from '../extractUrl';
 import { extractClipboardContent, processUniversalInput } from '../extractText';
 
 let testsPassed = 0;
@@ -226,6 +226,50 @@ const focus = true;
     // Persian text in pipeline
     const farsiDoc = await processUniversalInput('خواندن با ریتم متناسب باعث افزایش تمرکز می‌شود.');
     assert(farsiDoc.direction === 'rtl', 'Pipeline flags Persian text as RTL');
+  }
+
+  // 8. URL QUICK PREVIEW TESTS
+  console.log('\n--- 8. URL Quick Preview Generation ---');
+  {
+    const originalFetch = global.fetch;
+    const sampleArticleHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>The Science of Fast Reading and Attention - BrainJournal</title>
+        <meta property="og:title" content="The Science of Fast Reading and Attention">
+        <meta name="author" content="Alex Rivera">
+      </head>
+      <body>
+        <article>
+          <h1>The Science of Fast Reading and Attention</h1>
+          <p>Rapid serial visual presentation provides a structured mechanism to minimize regressions while reading technical or narrative prose.</p>
+          <p>By fixing gaze orientation and highlighting the optimal recognition point, cognitive processing overhead drops dramatically.</p>
+        </article>
+      </body>
+      </html>
+    `;
+
+    (global as any).fetch = async () => {
+      return {
+        ok: true,
+        text: async () => sampleArticleHtml,
+      } as any;
+    };
+
+    try {
+      const preview = await fetchUrlPreview('https://www.brainjournal.org/science/reading-flow', 300);
+      assert(preview.title === 'The Science of Fast Reading and Attention', 'Extracted preview title accurately');
+      assert(preview.domain === 'brainjournal.org', 'Derived clean domain without www');
+      assert(preview.author === 'Alex Rivera', 'Extracted author for preview');
+      assert(preview.wordCount > 20, 'Calculated word count greater than 20');
+      assert(preview.estimatedMinutes >= 1, 'Estimated reading minutes calculated based on WPM');
+      assert(typeof preview.excerpt === 'string' && preview.excerpt.length > 10, 'Generated clean excerpt snippet');
+      assert(preview.document.sourceType === 'url', 'Embedded preloaded document for instant commit');
+      assert(preview.document.content.includes('Rapid serial visual presentation'), 'Preloaded document contains article body');
+    } finally {
+      global.fetch = originalFetch;
+    }
   }
 
   console.log('\n=============================================');

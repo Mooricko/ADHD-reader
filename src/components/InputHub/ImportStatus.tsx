@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, AlertCircle, RefreshCw, Clipboard, UploadCloud, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw, Clipboard, UploadCloud, CheckCircle2, ExternalLink } from 'lucide-react';
 import { ImportState } from '../../types';
 
 interface ImportStatusProps {
@@ -43,15 +43,17 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({
             </p>
 
             <div className="flex flex-wrap items-center gap-2 mt-3">
-              {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+              {state.sourceUrl && (
+                <a
+                  href={state.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900/80 text-blue-300 text-xs font-medium flex items-center gap-1.5 transition-colors border border-blue-800/60"
+                  title="Open webpage in new tab to view and copy"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Try again</span>
-                </button>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open page to copy</span>
+                </a>
               )}
 
               {onPasteFallback && (
@@ -62,6 +64,17 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({
                 >
                   <Clipboard className="w-3.5 h-3.5 text-slate-400" />
                   <span>Paste article text</span>
+                </button>
+              )}
+
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Try again</span>
                 </button>
               )}
 

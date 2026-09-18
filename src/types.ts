@@ -134,6 +134,17 @@ export interface SavedDocument {
 
 export type InputSourceType = 'text' | 'url' | 'txt' | 'markdown' | 'pdf';
 
+export interface UrlPreviewData {
+  url: string;
+  title: string;
+  wordCount: number;
+  estimatedMinutes: number;
+  domain: string;
+  author?: string;
+  excerpt?: string;
+  document: ReaderDocument;
+}
+
 export interface ReaderDocument {
   id: string;
   sourceType: InputSourceType;
@@ -159,5 +170,6 @@ export interface ImportState {
   error?: string;
   errorAction?: 'retry' | 'paste' | 'another_file';
   detectedType?: InputSourceType;
+  sourceUrl?: string;
   document?: ReaderDocument;
 }

@@ -50,6 +50,7 @@ export const InputHub: React.FC<InputHubProps> = ({
   const [importState, setImportState] = useState<ImportState>({ stage: 'idle' });
   const [lastAttemptedFile, setLastAttemptedFile] = useState<File | null>(null);
   const [lastAttemptedUrl, setLastAttemptedUrl] = useState<string | null>(null);
+  const [urlInputValue, setUrlInputValue] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -117,10 +118,12 @@ export const InputHub: React.FC<InputHubProps> = ({
     } catch (err: any) {
       console.error('Import failure:', err);
       const errMsg = err?.message || "Couldn't extract readable text.";
+      const isUrl = typeof input === 'string' && isUrlString(input);
       setImportState({
         stage: 'error',
         error: errMsg,
-        detectedType: typeof input === 'string' ? (isUrlString(input) ? 'url' : 'text') : (input as File).name?.endsWith('.pdf') ? 'pdf' : 'text',
+        detectedType: typeof input === 'string' ? (isUrl ? 'url' : 'text') : (input as File).name?.endsWith('.pdf') ? 'pdf' : 'text',
+        sourceUrl: isUrl ? (input as string) : undefined,
       });
     }
   };
@@ -133,9 +136,25 @@ export const InputHub: React.FC<InputHubProps> = ({
   };
 
   // URL submitted from URL input or detected
-  const handleImportUrl = (url: string) => {
+  const handleImportUrl = (url: string, preloadedDoc?: ReaderDocument) => {
     setLastAttemptedUrl(url);
     setLastAttemptedFile(null);
+
+    // If already preloaded from quick preview, import instantly without re-fetching
+    if (preloadedDoc) {
+      setImportState({
+        stage: 'ready',
+        message: `Ready — ${preloadedDoc.metadata?.wordCount || 'Multiple'} words`,
+        document: preloadedDoc,
+      });
+
+      setTimeout(() => {
+        onImportDocument(preloadedDoc);
+        onClose?.();
+      }, 300);
+      return;
+    }
+
     handleProcessInput(url, 'url');
   };
 
@@ -144,10 +163,13 @@ export const InputHub: React.FC<InputHubProps> = ({
     try {
       const text = await navigator.clipboard.readText();
       if (text && text.trim()) {
-        setPastedText(text);
-        if (isUrlString(text.trim())) {
-          handleImportUrl(text.trim());
+        const trimmed = text.trim();
+        if (isUrlString(trimmed)) {
+          setUrlInputValue(trimmed);
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
         } else {
+          setPastedText(trimmed);
           setCopySuccess(true);
           setTimeout(() => setCopySuccess(false), 2000);
         }
@@ -280,7 +302,15 @@ export const InputHub: React.FC<InputHubProps> = ({
               }}
               onPasteFallback={() => {
                 setImportState({ stage: 'idle' });
-                textareaRef.current?.focus();
+                if (lastAttemptedUrl && !docTitle) {
+                  try {
+                    const parsed = new URL(lastAttemptedUrl.startsWith('http') ? lastAttemptedUrl : `https://${lastAttemptedUrl}`);
+                    setDocTitle(parsed.hostname.replace(/^www\./, ''));
+                  } catch {
+                    setDocTitle(lastAttemptedUrl);
+                  }
+                }
+                setTimeout(() => textareaRef.current?.focus(), 50);
               }}
               onChooseAnotherFile={() => {
                 setImportState({ stage: 'idle' });
@@ -311,6 +341,9 @@ export const InputHub: React.FC<InputHubProps> = ({
               isLoading={isProcessing}
               highlightColor={settings.highlightColor}
               disabled={isProcessing}
+              wpm={settings.wpm}
+              externalUrl={urlInputValue}
+              onUrlChange={setUrlInputValue}
             />
 
             {/* Rich Text & Markdown Input Area */}
@@ -362,9 +395,18 @@ export const InputHub: React.FC<InputHubProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 mt-2 px-1">
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     {isDetectedUrl ? (
-                      <span className="px-2 py-0.5 rounded-full bg-blue-950/60 border border-blue-800/60 text-blue-400 text-[11px] font-medium flex items-center gap-1">
-                        🌐 Web Article URL
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUrlInputValue(pastedText.trim());
+                          setPastedText('');
+                        }}
+                        className="px-2 py-0.5 rounded-full bg-blue-950/60 border border-blue-800/60 text-blue-400 hover:text-blue-300 hover:bg-blue-900/60 text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Transfer to URL Preview"
+                      >
+                        <span>🌐 Web Article URL</span>
+                        <span className="underline ml-1">Show Preview ↑</span>
+                      </button>
                     ) : isDetectedMarkdown ? (
                       <span className="px-2 py-0.5 rounded-full bg-purple-950/60 border border-purple-800/60 text-purple-400 text-[11px] font-medium flex items-center gap-1">
                         📝 Markdown prose formatting
