@@ -8,7 +8,7 @@ import {
   VolumeX,
   Focus
 } from 'lucide-react';
-import { HighlightedWordParts, ReaderSettings } from '../types';
+import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
@@ -16,6 +16,7 @@ import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 import { MarkerHighlight } from './MarkerHighlight';
+import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { LayoutGroup } from 'motion/react';
 
 interface FlowReaderProps {
@@ -29,6 +30,8 @@ interface FlowReaderProps {
   onRestart: () => void;
   onSwitchToRsvp: () => void;
   isIdle?: boolean;
+  heatmapData?: ReadingHeatmapData;
+  onResetHeatmap?: () => void;
 }
 
 interface ParagraphGroup {
@@ -47,6 +50,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   onRestart,
   onSwitchToRsvp,
   isIdle = false,
+  heatmapData,
+  onResetHeatmap,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -436,6 +441,22 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
           isIdle ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
+        {/* Visual Reading Progress Indicator (Complexity Heatmap) */}
+        {settings.showHeatmapProgress !== false && heatmapData && (
+          <div className="pb-1 border-b border-white/5">
+            <ReadingHeatmapProgress
+              words={words}
+              currentIndex={currentIndex}
+              onIndexChange={onIndexChange}
+              heatmapData={heatmapData}
+              theme={theme}
+              highlightHex={highlight.hex}
+              variant="inline"
+              onResetHeatmap={onResetHeatmap}
+            />
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button

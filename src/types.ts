@@ -48,6 +48,35 @@ export interface ReaderSettings {
   speechVolume: number; // 0 to 1 (default 1.0)
   speechRateMultiplier: number; // Fine-tuning rate multiplier (0.7 to 1.3, default 1.0)
   doNotDisturb: boolean; // Turns off all notifications when timer is set
+  showHeatmapProgress: boolean; // Visual reading progress indicator with color gradient heatmap for complex sections
+}
+
+export type ComplexityLevel = 'unread' | 'low' | 'moderate' | 'high' | 'peak';
+
+export interface HeatmapBucket {
+  index: number;
+  startWord: number;
+  endWord: number;
+  progressPercent: number; // 0 to 100
+  dwellTimeMs: number;
+  visitCount: number;
+  relativeIntensity: number; // 0.0 to 1.0
+  color: string; // CSS color code
+  isCurrent: boolean;
+  isRead: boolean;
+  sampleSnippet: string;
+  complexityLevel: ComplexityLevel;
+  complexityLabel: string;
+}
+
+export interface ReadingHeatmapData {
+  buckets: HeatmapBucket[];
+  totalDwellMs: number;
+  avgBucketDwellMs: number;
+  maxBucketDwellMs: number;
+  complexSectionsCount: number;
+  mostComplexBucket: HeatmapBucket | null;
+  gradientCss: string;
 }
 
 export interface SavedDocument {

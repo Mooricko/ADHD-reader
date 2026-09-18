@@ -19,7 +19,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { HighlightedWordParts, ReaderSettings } from '../types';
+import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { metronome } from '../utils/audioMetronome';
@@ -27,6 +27,7 @@ import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { RSVPMorphWord } from './RSVPMorphWord';
 import { ProudSquidPlayButton } from './ProudSquidPlayButton';
+import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
@@ -38,6 +39,8 @@ interface RSVPReaderProps {
   onUpdateSettings: (updater: Partial<ReaderSettings>) => void;
   onRestart: () => void;
   isIdle?: boolean;
+  heatmapData?: ReadingHeatmapData;
+  onResetHeatmap?: () => void;
 }
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
@@ -50,6 +53,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   onUpdateSettings,
   onRestart,
   isIdle = false,
+  heatmapData,
+  onResetHeatmap,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -504,32 +509,47 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           isIdle ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
-        {/* Timeline Scrubber */}
-        <div className="space-y-1.5 mb-4">
-          <div className="flex items-center justify-between text-xs font-mono font-medium">
-            <span className={theme.textMuted}>
-              Word {currentIndex + 1} of {words.length}
-            </span>
-            <span className={theme.textPrimary}>
-              {progressPercent}%
-            </span>
-          </div>
-
-          <div className="relative flex items-center w-full">
-            <input
-              id="reading-progress-slider"
-              type="range"
-              min="0"
-              max={Math.max(0, words.length - 1)}
-              value={currentIndex}
-              onChange={handleSeek}
-              aria-label="Reading progress"
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer focus:outline-none transition-all"
-              style={{
-                background: `linear-gradient(to right, ${highlight.hex} 0%, ${highlight.hex} ${progressPercent}%, rgba(148, 163, 184, 0.2) ${progressPercent}%, rgba(148, 163, 184, 0.2) 100%)`,
-              }}
+        {/* Timeline Scrubber / Reading Complexity Heatmap */}
+        <div className="mb-4">
+          {settings.showHeatmapProgress !== false && heatmapData ? (
+            <ReadingHeatmapProgress
+              words={words}
+              currentIndex={currentIndex}
+              onIndexChange={onIndexChange}
+              heatmapData={heatmapData}
+              theme={theme}
+              highlightHex={highlight.hex}
+              variant="inline"
+              onResetHeatmap={onResetHeatmap}
             />
-          </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-mono font-medium">
+                <span className={theme.textMuted}>
+                  Word {currentIndex + 1} of {words.length}
+                </span>
+                <span className={theme.textPrimary}>
+                  {progressPercent}%
+                </span>
+              </div>
+
+              <div className="relative flex items-center w-full">
+                <input
+                  id="reading-progress-slider"
+                  type="range"
+                  min="0"
+                  max={Math.max(0, words.length - 1)}
+                  value={currentIndex}
+                  onChange={handleSeek}
+                  aria-label="Reading progress"
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer focus:outline-none transition-all"
+                  style={{
+                    background: `linear-gradient(to right, ${highlight.hex} 0%, ${highlight.hex} ${progressPercent}%, rgba(148, 163, 184, 0.2) ${progressPercent}%, rgba(148, 163, 184, 0.2) 100%)`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action Controls Row */}

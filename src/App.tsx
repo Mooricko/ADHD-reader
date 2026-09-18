@@ -27,6 +27,7 @@ import {
   getStoredCapturedText, 
   clearStoredCapturedText 
 } from './utils/extensionBridge';
+import { useReadingHeatmap } from './hooks/useReadingHeatmap';
 import { CheckCircle2, Zap } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   speechVolume: 1.0,
   speechRateMultiplier: 1.0,
   doNotDisturb: false,
+  showHeatmapProgress: true,
 };
 
 const STORAGE_KEYS = {
@@ -86,6 +88,7 @@ export default function App() {
             merged.chunkSize = Number(merged.chunkSize) as 1 | 3 | 5;
           }
           if (typeof merged.doNotDisturb !== 'boolean') merged.doNotDisturb = false;
+          if (typeof merged.showHeatmapProgress !== 'boolean') merged.showHeatmapProgress = true;
           return merged;
         }
       }
@@ -604,6 +607,16 @@ export default function App() {
 
   const currentThemeConfig = getTheme(settings.theme);
 
+  // Heatmap Dwell Time & Complexity Tracking Engine
+  const { heatmapData, resetHeatmap } = useReadingHeatmap({
+    words: parsedWords,
+    currentIndex,
+    isPlaying,
+    wpm: settings.wpm,
+    documentTitle: currentTitle,
+    isIdle,
+  });
+
   return (
     <div 
       id="adhd-reader-app"
@@ -652,6 +665,8 @@ export default function App() {
             onUpdateSettings={handleUpdateSettings}
             onRestart={handleRestart}
             isIdle={isIdle}
+            heatmapData={heatmapData}
+            onResetHeatmap={resetHeatmap}
           />
         ) : (
           <FlowReader
@@ -665,9 +680,31 @@ export default function App() {
             onRestart={handleRestart}
             onSwitchToRsvp={() => setViewMode('rsvp')}
             isIdle={isIdle}
+            heatmapData={heatmapData}
+            onResetHeatmap={resetHeatmap}
           />
         )}
       </main>
+
+      {/* Persistent Bottom Edge Visual Heatmap Progress Line */}
+      {settings.showHeatmapProgress !== false && heatmapData && (
+        <div
+          id="screen-bottom-heatmap-indicator"
+          className="fixed bottom-0 inset-x-0 h-1 sm:h-1.5 z-30 transition-all duration-300 opacity-85 hover:opacity-100 pointer-events-none"
+          style={{
+            background: heatmapData.gradientCss,
+            boxShadow: '0 -1px 6px rgba(0, 0, 0, 0.4)',
+          }}
+        >
+          {/* Active playhead point on bottom edge */}
+          <div
+            className="absolute top-0 bottom-0 w-2.5 -translate-x-1/2 bg-white shadow-md rounded-full"
+            style={{
+              left: `${parsedWords.length > 0 ? (currentIndex / Math.max(1, parsedWords.length - 1)) * 100 : 0}%`,
+            }}
+          />
+        </div>
+      )}
 
       {/* Modals & Drawers */}
       <TextInputModal

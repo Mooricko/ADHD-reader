@@ -525,6 +525,25 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               />
             </div>
 
+            {/* Reading Complexity Heatmap */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
+              <div>
+                <div className={`text-xs font-semibold ${theme.textPrimary}`}>
+                  Reading Complexity Heatmap
+                </div>
+                <div className={`text-[11px] ${theme.textMuted}`}>
+                  Color gradient progress bar mapping dwell time & complex sections
+                </div>
+              </div>
+              <input
+                id="toggle-heatmap-progress"
+                type="checkbox"
+                checked={settings.showHeatmapProgress !== false}
+                onChange={(e) => onUpdateSettings({ showHeatmapProgress: e.target.checked })}
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
+              />
+            </div>
+
             {/* Smart Punctuation Pauses */}
             <div className="flex items-center justify-between p-3 rounded-xl border border-white/5 bg-black/10">
               <div>
