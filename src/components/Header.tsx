@@ -14,7 +14,8 @@ import {
   Sun,
   Moon,
   Timer,
-  BellOff
+  BellOff,
+  Activity
 } from 'lucide-react';
 import { ReaderSettings, ReaderViewMode } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS } from '../utils/themeStyles';
@@ -36,6 +37,7 @@ interface HeaderProps {
   isTimerRunning?: boolean;
   isTimerSet?: boolean;
   onOpenTimerModal?: () => void;
+  onOpenStatsModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   isTimerRunning = false,
   isTimerSet = false,
   onOpenTimerModal,
+  onOpenStatsModal,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -123,6 +126,21 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Reading Statistics & Analytics Button */}
+          {onOpenStatsModal && (
+            <button
+              id="open-stats-modal-btn"
+              type="button"
+              onClick={onOpenStatsModal}
+              title="Reading Statistics & Heatmap Analytics (Average WPM, words read, sessions)"
+              aria-label="Reading Statistics"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold ${theme.borderClass} ${theme.textMuted} hover:${theme.textPrimary} hover:${theme.accentSurface} transition-all shadow-xs`}
+            >
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden md:inline">Stats</span>
+            </button>
+          )}
+
           {/* Focus Timer Button */}
           {onOpenTimerModal && (
             <button

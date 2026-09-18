@@ -32,6 +32,7 @@ interface FlowReaderProps {
   isIdle?: boolean;
   heatmapData?: ReadingHeatmapData;
   onResetHeatmap?: () => void;
+  onOpenStatsModal?: () => void;
 }
 
 interface ParagraphGroup {
@@ -52,6 +53,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   isIdle = false,
   heatmapData,
   onResetHeatmap,
+  onOpenStatsModal,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -453,6 +455,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
               highlightHex={highlight.hex}
               variant="inline"
               onResetHeatmap={onResetHeatmap}
+              onOpenStatsModal={onOpenStatsModal}
             />
           </div>
         )}

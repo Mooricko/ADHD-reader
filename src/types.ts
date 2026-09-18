@@ -79,6 +79,48 @@ export interface ReadingHeatmapData {
   gradientCss: string;
 }
 
+export interface ReadingSessionRecord {
+  id: string;
+  timestamp: number;
+  dateLabel: string;
+  documentTitle: string;
+  wordsRead: number;
+  dwellMs: number;
+  averageWpm: number;
+  targetWpm: number;
+}
+
+export interface WpmHistoryPoint {
+  id: string;
+  timestamp: number;
+  dateLabel: string;
+  timeLabel: string;
+  sessionNumber: number;
+  avgWpm: number;
+  targetWpm: number;
+  wordsRead: number;
+  dwellSeconds: number;
+  documentTitle: string;
+}
+
+export interface ReadingStatsSummary {
+  totalWordsRead: number;
+  totalReadingTimeMs: number;
+  totalSessionsCount: number;
+  overallAverageWpm: number;
+  currentDocWordsRead: number;
+  currentDocDwellMs: number;
+  currentDocAvgWpm: number;
+  wpmHistory: WpmHistoryPoint[];
+  recentSessions: ReadingSessionRecord[];
+  complexityBreakdown: {
+    fastWords: number;
+    steadyWords: number;
+    complexWords: number;
+    unreadWords: number;
+  };
+}
+
 export interface SavedDocument {
   id: string;
   title: string;

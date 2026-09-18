@@ -41,6 +41,7 @@ interface RSVPReaderProps {
   isIdle?: boolean;
   heatmapData?: ReadingHeatmapData;
   onResetHeatmap?: () => void;
+  onOpenStatsModal?: () => void;
 }
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
@@ -55,6 +56,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   isIdle = false,
   heatmapData,
   onResetHeatmap,
+  onOpenStatsModal,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -521,6 +523,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               highlightHex={highlight.hex}
               variant="inline"
               onResetHeatmap={onResetHeatmap}
+              onOpenStatsModal={onOpenStatsModal}
             />
           ) : (
             <div className="space-y-1.5">

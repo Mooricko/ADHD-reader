@@ -21,6 +21,7 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ExtensionHubModal } from './components/ExtensionHubModal';
 import { FocusTimerModal } from './components/FocusTimerModal';
+import { ReadingStatsModal } from './components/ReadingStatsModal';
 import { safeStorage } from './utils/safeStorage';
 import { 
   isChromeExtensionEnvironment, 
@@ -186,6 +187,7 @@ export default function App() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isExtensionHubOpen, setIsExtensionHubOpen] = useState(false);
   const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
+  const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
 
   // 5. Reading Focus Timer & Sessions (Requirement 4 & 5)
@@ -533,6 +535,8 @@ export default function App() {
         showToast(!settings.speechNarration ? '🎙️ Voice-Over Narration Enabled' : '🔇 Voice-Over Narration Disabled');
       } else if (e.key === 't' || e.key === 'T') {
         setIsTimerModalOpen((prev) => !prev);
+      } else if (e.key === 'a' || e.key === 'A') {
+        setIsStatsModalOpen((prev) => !prev);
       } else if (e.key === 'd' || e.key === 'D') {
         handleUpdateSettings({ theme: settings.theme === 'light' ? 'midnight' : 'light' });
       } else if (e.code === 'Escape') {
@@ -541,6 +545,7 @@ export default function App() {
         setIsShortcutsOpen(false);
         setIsExtensionHubOpen(false);
         setIsTimerModalOpen(false);
+        setIsStatsModalOpen(false);
       }
     };
 
@@ -563,7 +568,7 @@ export default function App() {
   const [isIdle, setIsIdle] = useState(false);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen || isTimerModalOpen;
+  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen || isTimerModalOpen || isStatsModalOpen;
 
   const resetIdleTimer = useCallback(() => {
     setIsIdle(false);
@@ -608,7 +613,7 @@ export default function App() {
   const currentThemeConfig = getTheme(settings.theme);
 
   // Heatmap Dwell Time & Complexity Tracking Engine
-  const { heatmapData, resetHeatmap } = useReadingHeatmap({
+  const { heatmapData, statsSummary, resetHeatmap, clearAllStats } = useReadingHeatmap({
     words: parsedWords,
     currentIndex,
     isPlaying,
@@ -649,6 +654,7 @@ export default function App() {
           isTimerRunning={isTimerRunning}
           isTimerSet={isTimerSet}
           onOpenTimerModal={() => setIsTimerModalOpen(true)}
+          onOpenStatsModal={() => setIsStatsModalOpen(true)}
         />
       )}
 
@@ -667,6 +673,7 @@ export default function App() {
             isIdle={isIdle}
             heatmapData={heatmapData}
             onResetHeatmap={resetHeatmap}
+            onOpenStatsModal={() => setIsStatsModalOpen(true)}
           />
         ) : (
           <FlowReader
@@ -682,6 +689,7 @@ export default function App() {
             isIdle={isIdle}
             heatmapData={heatmapData}
             onResetHeatmap={resetHeatmap}
+            onOpenStatsModal={() => setIsStatsModalOpen(true)}
           />
         )}
       </main>
@@ -765,6 +773,16 @@ export default function App() {
         onToggleDoNotDisturb={(dnd) => handleUpdateSettings({ doNotDisturb: dnd })}
         theme={currentThemeConfig}
         highlightHex={HIGHLIGHT_COLORS[settings.highlightColor]?.hex || '#ef4444'}
+      />
+
+      {/* Reading Statistics & Heatmap Analytics Modal */}
+      <ReadingStatsModal
+        isOpen={isStatsModalOpen}
+        onClose={() => setIsStatsModalOpen(false)}
+        statsSummary={statsSummary}
+        settings={settings}
+        currentDocumentTitle={currentTitle}
+        onClearStats={clearAllStats}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { HighlightedWordParts, ReadingHeatmapData, HeatmapBucket } from '../types';
 import { ThemeConfig } from '../utils/themeStyles';
-import { Flame, Clock, Info, ChevronUp, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Flame, Clock, Info, ChevronUp, ChevronDown, CheckCircle2, Activity } from 'lucide-react';
 
 export interface ReadingHeatmapProgressProps {
   words: HighlightedWordParts[];
@@ -13,6 +13,7 @@ export interface ReadingHeatmapProgressProps {
   variant?: 'inline' | 'docked';
   className?: string;
   onResetHeatmap?: () => void;
+  onOpenStatsModal?: () => void;
 }
 
 export const ReadingHeatmapProgress: React.FC<ReadingHeatmapProgressProps> = ({
@@ -25,6 +26,7 @@ export const ReadingHeatmapProgress: React.FC<ReadingHeatmapProgressProps> = ({
   variant = 'inline',
   className = '',
   onResetHeatmap,
+  onOpenStatsModal,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredBucket, setHoveredBucket] = useState<HeatmapBucket | null>(null);
@@ -131,6 +133,18 @@ export const ReadingHeatmapProgress: React.FC<ReadingHeatmapProgressProps> = ({
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800/60 border border-slate-700/60 text-slate-300">
             {formattedTotalDwell} read
           </span>
+          {onOpenStatsModal && (
+            <button
+              id="open-stats-from-heatmap-btn"
+              type="button"
+              onClick={onOpenStatsModal}
+              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+              title="Open Reading Statistics Modal (WPM over time, words read, sessions)"
+            >
+              <Activity className="w-2.5 h-2.5" />
+              <span>Stats</span>
+            </button>
+          )}
           {complexBuckets.length > 0 && (
             <button
               type="button"
