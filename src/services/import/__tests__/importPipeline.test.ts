@@ -272,6 +272,19 @@ const focus = true;
     }
   }
 
+  // 9. WIKIPEDIA URL OPTIMIZATION & MULTI-LAYER RESILIENCE
+  console.log('\n--- 9. Wikipedia URL Optimization & Resilience ---');
+  {
+    const wikiEn = isWikipediaUrl('https://en.wikipedia.org/wiki/Attention_deficit_hyperactivity_disorder');
+    assert(wikiEn !== null && wikiEn.lang === 'en' && wikiEn.title === 'Attention_deficit_hyperactivity_disorder', 'Identifies standard English Wikipedia article');
+
+    const wikiDe = isWikipediaUrl('https://de.wikipedia.org/wiki/Lesen?section=2#Header');
+    assert(wikiDe !== null && wikiDe.lang === 'de' && wikiDe.title === 'Lesen', 'Identifies German Wikipedia and strips anchors/parameters');
+
+    const nonWiki = isWikipediaUrl('https://example.com/wiki/test');
+    assert(nonWiki === null, 'Rejects non-Wikipedia domains with /wiki/ path');
+  }
+
   console.log('\n=============================================');
   console.log(`🏁 Test Results: ${testsPassed} passed, ${testsFailed} failed`);
   console.log('=============================================\n');
