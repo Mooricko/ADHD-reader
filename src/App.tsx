@@ -11,7 +11,8 @@ import {
   HighlightedWordParts 
 } from './types';
 import { SAMPLE_TEXTS } from './data/sampleTexts';
-import { parseTextIntoWords } from './utils/textParser';
+import { parseTextIntoWords, countWordsFast } from './utils/textParser';
+import { logDevDiagnostic } from './utils/performanceDiagnostics';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS, getTheme } from './utils/themeStyles';
 import { Header } from './components/Header';
 import { RSVPReader } from './components/RSVPReader';
@@ -374,6 +375,23 @@ export default function App() {
     }
   }, [parsedWords.length, currentIndex]);
 
+  // Dev-only timing instrumentation for initial reader render
+  const lastRenderedTextRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastRenderedTextRef.current !== currentText) {
+      lastRenderedTextRef.current = currentText;
+      const start = performance.now();
+      requestAnimationFrame(() => {
+        const durationMs = Math.round((performance.now() - start) * 100) / 100;
+        logDevDiagnostic('initial reader render', {
+          durationMs,
+          charCount: currentText.length,
+          wordCount: parsedWords.length,
+        });
+      });
+    }
+  }, [currentText, parsedWords.length]);
+
   // Save text changes
   const handleApplyText = useCallback((text: string, title?: string) => {
     const validText = text && text.trim() ? text : SAMPLE_TEXTS[0].text;
@@ -395,7 +413,7 @@ export default function App() {
           id: existingIdx >= 0 ? prev[existingIdx].id : `doc-${Date.now()}`,
           title: validTitle,
           text: validText,
-          wordCount: validText.trim().split(/\s+/).filter(Boolean).length,
+          wordCount: countWordsFast(validText),
           lastReadIndex: 0,
           lastReadDate: new Date().toISOString(),
         };
@@ -491,18 +509,50 @@ export default function App() {
     });
   }, []);
 
-  // Save index on change
+  // Debounced persistence for currentIndex to prevent disk I/O thrashing during 5-10 words/sec RSVP playback
+  const indexSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingIndexSaveRef = useRef<number | null>(null);
+
+  const flushIndexSave = useCallback(() => {
+    if (pendingIndexSaveRef.current !== null) {
+      try {
+        safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, pendingIndexSaveRef.current.toString());
+      } catch {
+        // Ignore
+      }
+      pendingIndexSaveRef.current = null;
+    }
+  }, []);
+
+  // Save index on change (React state updates immediately; storage write is debounced)
   const handleIndexChange = useCallback((newIdx: number) => {
     setIsAutoPaused(false);
     setAutoPauseReason(null);
     const validIdx = Math.max(0, isNaN(newIdx) || !isFinite(newIdx) ? 0 : Math.floor(newIdx));
     setCurrentIndex(validIdx);
-    try {
-      safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, validIdx.toString());
-    } catch {
-      // Ignore
+    pendingIndexSaveRef.current = validIdx;
+
+    if (!indexSaveTimeoutRef.current) {
+      indexSaveTimeoutRef.current = setTimeout(() => {
+        indexSaveTimeoutRef.current = null;
+        flushIndexSave();
+      }, 750);
     }
-  }, []);
+  }, [flushIndexSave]);
+
+  // Flush pending index whenever playback stops
+  useEffect(() => {
+    if (!isPlaying) {
+      flushIndexSave();
+    }
+  }, [isPlaying, flushIndexSave]);
+
+  // Flush on unmount
+  useEffect(() => {
+    return () => {
+      flushIndexSave();
+    };
+  }, [flushIndexSave]);
 
   const currentIndexRef = useRef(currentIndex);
   useEffect(() => {

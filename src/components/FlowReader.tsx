@@ -18,6 +18,7 @@ import { ProudSquidPlayButton } from './ProudSquidPlayButton';
 import { MarkerHighlight } from './MarkerHighlight';
 import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { LayoutGroup } from 'motion/react';
+import { measureDevTiming } from '../utils/performanceDiagnostics';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -88,25 +89,34 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
     if (!words || words.length === 0) return [];
 
-    const groups: ParagraphGroup[] = [];
-    let currentGroup: ParagraphGroup | null = null;
+    return measureDevTiming(
+      'FlowReader paragraph grouping',
+      () => {
+        const groups: ParagraphGroup[] = [];
+        let currentGroup: ParagraphGroup | null = null;
 
-    words.forEach((w, idx) => {
-      const pIdx = w.paragraphIndex ?? 0;
-      if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
+        words.forEach((w, idx) => {
+          const pIdx = w.paragraphIndex ?? 0;
+          if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
+            if (currentGroup) {
+              groups.push(currentGroup);
+            }
+            currentGroup = { paragraphIndex: pIdx, words: [] };
+          }
+          currentGroup.words.push({ word: w, globalIndex: idx });
+        });
+
         if (currentGroup) {
           groups.push(currentGroup);
         }
-        currentGroup = { paragraphIndex: pIdx, words: [] };
-      }
-      currentGroup.words.push({ word: w, globalIndex: idx });
-    });
 
-    if (currentGroup) {
-      groups.push(currentGroup);
-    }
-
-    return groups;
+        return groups;
+      },
+      (groups) => ({
+        wordCount: words.length,
+        paragraphCount: groups.length,
+      })
+    );
   }, [words]);
 
   // Determine current active paragraph index from currentIndex

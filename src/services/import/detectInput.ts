@@ -8,6 +8,10 @@ const LOOSE_URL_REGEX = /^https?:\/\/[^\s]+$/i;
  */
 export function isUrlString(input: string): boolean {
   if (!input) return false;
+  // URLs in the real world do not exceed 2048 characters.
+  // Avoid trimming and running URLs regex against massive documents.
+  if (input.length > 2048 || input.length < 4) return false;
+
   const trimmed = input.trim();
   if (trimmed.includes('\n') || trimmed.includes('\r')) return false;
   
@@ -39,6 +43,10 @@ export function isUrlString(input: string): boolean {
 export function isMarkdownString(input: string): boolean {
   if (!input) return false;
 
+  // For large documents, sampling the first 16,000 characters gives high accuracy
+  // without repeatedly scanning hundreds of thousands of characters with complex regexes.
+  const sample = input.length > 16000 ? input.slice(0, 16000) : input;
+
   const patterns = [
     /^#{1,6}\s+[^\n]+/m, // # Heading
     /\[.+?\]\(https?:\/\/[^\s)]+\)/, // [link](url)
@@ -54,14 +62,14 @@ export function isMarkdownString(input: string): boolean {
 
   let matches = 0;
   for (const pattern of patterns) {
-    if (pattern.test(input)) {
+    if (pattern.test(sample)) {
       matches++;
       if (matches >= 2) return true;
     }
   }
 
   // Single strong signal like heading or codeblock
-  if (/^#{1,6}\s+[^\n]+/m.test(input) || /```[\s\S]*?```/.test(input)) {
+  if (/^#{1,6}\s+[^\n]+/m.test(sample) || /```[\s\S]*?```/.test(sample)) {
     return true;
   }
 

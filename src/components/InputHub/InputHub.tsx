@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { 
   Clipboard, 
   Sparkles, 
@@ -20,6 +20,7 @@ import { ImportStatus } from './ImportStatus';
 import { processUniversalInput } from '../../services/import/extractText';
 import { isUrlString, isMarkdownString } from '../../services/import/detectInput';
 import { calculateTextStats, isRtlText } from '../../utils/textParser';
+import { classifyDocumentScale } from '../../utils/performanceDiagnostics';
 import { HIGHLIGHT_COLORS, THEME_CONFIGS } from '../../utils/themeStyles';
 import { SAMPLE_TEXTS } from '../../data/sampleTexts';
 
@@ -57,10 +58,35 @@ export const InputHub: React.FC<InputHubProps> = ({
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor] || HIGHLIGHT_COLORS.red;
   const theme = THEME_CONFIGS[settings.theme] || THEME_CONFIGS.midnight;
 
-  const isDetectedUrl = isUrlString(pastedText.trim());
-  const isDetectedMarkdown = isMarkdownString(pastedText);
-  const stats = calculateTextStats(pastedText, settings.wpm);
-  const isRtl = isRtlText(pastedText);
+  // React 18 useDeferredValue ensures typing inside the textarea remains 60fps responsive
+  // even for 100,000+ character documents, avoiding synchronous blocking stats calculations.
+  const deferredPastedText = useDeferredValue(pastedText);
+
+  const { isDetectedUrl, isDetectedMarkdown, stats, isRtl, docScale } = useMemo(() => {
+    if (!deferredPastedText) {
+      return {
+        isDetectedUrl: false,
+        isDetectedMarkdown: false,
+        stats: calculateTextStats('', settings.wpm),
+        isRtl: false,
+        docScale: 'normal' as const,
+      };
+    }
+
+    const isUrl = isUrlString(deferredPastedText);
+    const isMd = !isUrl && isMarkdownString(deferredPastedText);
+    const textStats = calculateTextStats(deferredPastedText, settings.wpm);
+    const rtl = isRtlText(deferredPastedText);
+    const scale = classifyDocumentScale(textStats.charCount, textStats.wordCount);
+
+    return {
+      isDetectedUrl: isUrl,
+      isDetectedMarkdown: isMd,
+      stats: textStats,
+      isRtl: rtl,
+      docScale: scale,
+    };
+  }, [deferredPastedText, settings.wpm]);
 
   // Keyboard shortcuts handler for Input Hub
   useEffect(() => {
@@ -416,6 +442,12 @@ export const InputHub: React.FC<InputHubProps> = ({
                         🇮🇷 راست‌چین (RTL / فارسی)
                       </span>
                     ) : null}
+
+                    {docScale !== 'normal' && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-emerald-400 text-[11px] font-medium flex items-center gap-1">
+                        {docScale === 'extreme' ? '⚡ Extreme Document' : docScale === 'very-large' ? '📚 Book-Length' : '📘 Large Document'}
+                      </span>
+                    )}
 
                     {pastedText.trim() && !isDetectedUrl && (
                       <span>

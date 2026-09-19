@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/services/import/__tests__/importPipeline.test.ts && tsx src/hooks/__tests__/smartAutoPause.test.ts"
+    "test": "tsx src/services/import/__tests__/importPipeline.test.ts && tsx src/hooks/__tests__/smartAutoPause.test.ts && tsx src/utils/__tests__/phase1PerformanceAndDiagnostics.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

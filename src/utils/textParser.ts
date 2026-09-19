@@ -1,10 +1,70 @@
 import { HighlightedWordParts, HighlightStyle } from '../types';
+import { measureDevTiming } from './performanceDiagnostics';
 
 /**
  * Checks if a string contains Right-to-Left (Persian/Arabic/Hebrew) characters.
+ * Optimized with early ASCII check and sampling for large texts.
  */
 export function isRtlText(text: string): boolean {
-  return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFB4F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
+  if (!text) return false;
+
+  // Fast path: if short and all chars are below RTL ranges (< 0x0590), return false immediately
+  if (text.length <= 32) {
+    let hasRtlCandidate = false;
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) >= 0x0590) {
+        hasRtlCandidate = true;
+        break;
+      }
+    }
+    if (!hasRtlCandidate) return false;
+  }
+
+  // Sample the first 8,000 characters for large texts to avoid expensive full-string scans
+  const sample = text.length > 8000 ? text.slice(0, 8000) : text;
+  return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFB4F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(sample);
+}
+
+/**
+ * Allocation-free word count.
+ * Scans character codes for whitespace transitions without creating substring arrays.
+ */
+export function countWordsFast(text: string): number {
+  if (!text) return 0;
+  let count = 0;
+  let inWord = false;
+  const len = text.length;
+
+  for (let i = 0; i < len; i++) {
+    const code = text.charCodeAt(i);
+    // Common whitespace: space (32), tab (9), newline (10), CR (13), form feed (12), NBSP (160)
+    // and Unicode spaces (0x2000-0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff)
+    const isSpace =
+      code <= 32 ||
+      code === 160 ||
+      (code >= 0x2000 && code <= 0x200a) ||
+      code === 0x2028 ||
+      code === 0x2029 ||
+      code === 0x202f ||
+      code === 0x205f ||
+      code === 0x3000 ||
+      code === 0xfeff;
+
+    if (isSpace) {
+      if (inWord) {
+        count++;
+        inWord = false;
+      }
+    } else {
+      inWord = true;
+    }
+  }
+
+  if (inWord) {
+    count++;
+  }
+
+  return count;
 }
 
 /**
@@ -214,30 +274,61 @@ export function parseTextIntoWords(rawText: string, highlightStyle: HighlightSty
     return [];
   }
 
-  // Normalize line endings and whitespace
-  const paragraphs = rawText.split(/\r?\n+/);
-  const result: HighlightedWordParts[] = [];
-  let globalWordIndex = 0;
+  return measureDevTiming(
+    'parseTextIntoWords',
+    () => {
+      try {
+        const paragraphs = rawText.split(/\r?\n+/);
+        const result: HighlightedWordParts[] = [];
+        let globalWordIndex = 0;
 
-  paragraphs.forEach((paragraph, pIndex) => {
-    const rawTokens = paragraph.trim().split(/\s+/).filter(Boolean);
-    const isLastParagraph = pIndex === paragraphs.length - 1;
+        paragraphs.forEach((paragraph, pIndex) => {
+          // match(/\S+/g) extracts all tokens in a single native regex pass without allocating trimmed strings or filtering arrays
+          const rawTokens = paragraph.match(/\S+/g);
+          if (!rawTokens || rawTokens.length === 0) return;
 
-    rawTokens.forEach((token, wIndex) => {
-      const isLastInParagraph = wIndex === rawTokens.length - 1;
-      const parsedWord = splitWordParts(token, highlightStyle, globalWordIndex);
-      parsedWord.paragraphIndex = pIndex;
-      
-      if (isLastInParagraph && !isLastParagraph) {
-        parsedWord.hasParagraphBreak = true;
+          const isLastParagraph = pIndex === paragraphs.length - 1;
+
+          rawTokens.forEach((token, wIndex) => {
+            const isLastInParagraph = wIndex === rawTokens.length - 1;
+            const parsedWord = splitWordParts(token, highlightStyle, globalWordIndex);
+            parsedWord.paragraphIndex = pIndex;
+            
+            if (isLastInParagraph && !isLastParagraph) {
+              parsedWord.hasParagraphBreak = true;
+            }
+
+            result.push(parsedWord);
+            globalWordIndex++;
+          });
+        });
+
+        return result;
+      } catch (err) {
+        console.error('[TextParser] Error parsing words, returning basic fallback:', err);
+        // Resilient fallback: split simply by whitespace if sophisticated parser fails
+        const fallbackTokens = rawText.match(/\S+/g) || [];
+        return fallbackTokens.map((token, idx) => ({
+          original: token,
+          prefixPunct: '',
+          beforeHighlight: '',
+          highlightedText: token,
+          afterHighlight: '',
+          suffixPunct: '',
+          isRtl: false,
+          hasSentenceEnd: /[.!?]+$/.test(token),
+          hasClausePause: /[,;:]+$/.test(token),
+          hasParagraphBreak: false,
+          index: idx,
+        }));
       }
-
-      result.push(parsedWord);
-      globalWordIndex++;
-    });
-  });
-
-  return result;
+    },
+    (res) => ({
+      charCount: rawText.length,
+      wordCount: res.length,
+      paragraphCount: rawText.split(/\r?\n+/).length,
+    })
+  );
 }
 
 /**
@@ -256,7 +347,15 @@ export function splitWordParts(token: string, style: HighlightStyle = 'middle-tw
   const suffixPunct = trailingMatch ? trailingMatch[0] : '';
   const coreWord = remainingAfterPrefix.slice(0, remainingAfterPrefix.length - suffixPunct.length);
 
-  const isRtl = isRtlText(token);
+  // Fast check: only run RTL regex if token has characters in RTL range (>= 0x0590)
+  let isRtl = false;
+  if (token.length > 0) {
+    const firstCode = token.charCodeAt(0);
+    const lastCode = token.charCodeAt(token.length - 1);
+    if (firstCode >= 0x0590 || lastCode >= 0x0590) {
+      isRtl = isRtlText(token);
+    }
+  }
 
   // Check punctuation types for smart pauses (including Persian punctuation: '۔', '؟', '،', '؛')
   const hasSentenceEnd = /[.!?…۔؟]+/.test(suffixPunct);
@@ -451,14 +550,24 @@ export function calculateWordDelayMs(
 }
 
 /**
- * Calculate reading statistics for a text
+ * Calculate reading statistics for a text (allocation-free).
  */
 export function calculateTextStats(text: string, wpm: number) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  const wordCount = words.length;
+  if (!text) {
+    return {
+      wordCount: 0,
+      charCount: 0,
+      estimatedMinutes: 0,
+      timeFormatted: '0s',
+      estimatedSecondsTotal: 0,
+    };
+  }
+
   const charCount = text.length;
-  const estimatedMinutes = wordCount / Math.max(1, wpm);
-  const estimatedSecondsTotal = Math.round(estimatedMinutes * 60);
+  const wordCount = countWordsFast(text);
+  const safeWpm = Math.max(1, wpm);
+  const estimatedMinutes = Math.round((wordCount / safeWpm) * 10) / 10;
+  const estimatedSecondsTotal = Math.round((wordCount / safeWpm) * 60);
 
   const mins = Math.floor(estimatedSecondsTotal / 60);
   const secs = estimatedSecondsTotal % 60;
