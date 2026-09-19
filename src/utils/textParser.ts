@@ -1,5 +1,6 @@
 import { HighlightedWordParts, HighlightStyle } from '../types';
 import { measureDevTiming } from './performanceDiagnostics';
+import { getSmartPaceMultiplier } from './smartPacing';
 
 /**
  * Checks if a string contains Right-to-Left (Persian/Arabic/Hebrew) characters.
@@ -521,32 +522,41 @@ export function splitWordParts(token: string, style: HighlightStyle = 'middle-tw
 
 /**
  * Calculates the display duration in ms for a given word token based on base WPM,
- * punctuation pauses, and word complexity.
+ * punctuation pauses, and Smart Pace (word length and complexity).
  */
 export function calculateWordDelayMs(
   word: HighlightedWordParts,
   wpm: number,
-  smartPause: boolean = true
+  smartPause: boolean = true,
+  smartPace: boolean = false
 ): number {
   const baseMs = (60 / Math.max(50, wpm)) * 1000;
-  
-  if (!smartPause) {
-    return baseMs;
+
+  // 1. Natural punctuation pause multiplier
+  let punctuationMultiplier = 1.0;
+  if (smartPause) {
+    if (word.hasParagraphBreak) {
+      punctuationMultiplier = 2.4;
+    } else if (word.hasSentenceEnd) {
+      punctuationMultiplier = 2.1;
+    } else if (word.hasClausePause) {
+      punctuationMultiplier = 1.45;
+    } else if (!smartPace && word.original.length > 9) {
+      // Baseline length pause fallback when Smart Pace is off
+      punctuationMultiplier = 1.2;
+    }
   }
 
-  let multiplier = 1.0;
-
-  if (word.hasParagraphBreak) {
-    multiplier = 2.4;
-  } else if (word.hasSentenceEnd) {
-    multiplier = 2.1;
-  } else if (word.hasClausePause) {
-    multiplier = 1.45;
-  } else if (word.original.length > 9) {
-    multiplier = 1.2;
+  // 2. Smart Pace: dynamically speeds up for short/simple words and slows down for long/complex ones
+  let paceMultiplier = 1.0;
+  if (smartPace) {
+    paceMultiplier = getSmartPaceMultiplier(word);
   }
 
-  return Math.round(baseMs * multiplier);
+  // Combined multiplier, capped at 2.8 to ensure smooth flow without unnatural stalls
+  const totalMultiplier = Math.min(2.8, punctuationMultiplier * paceMultiplier);
+
+  return Math.round(baseMs * totalMultiplier);
 }
 
 /**

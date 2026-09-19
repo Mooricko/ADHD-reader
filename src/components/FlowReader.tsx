@@ -6,11 +6,14 @@ import {
   Headphones,
   Volume2,
   VolumeX,
-  Focus
+  Focus,
+  Zap,
+  Flame
 } from 'lucide-react';
-import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData } from '../types';
+import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData, WarmupStatus } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
+import { analyzeWordSmartPace } from '../utils/smartPacing';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
@@ -34,6 +37,10 @@ interface FlowReaderProps {
   heatmapData?: ReadingHeatmapData;
   onResetHeatmap?: () => void;
   onOpenStatsModal?: () => void;
+  warmupStatus?: WarmupStatus;
+  onWordStep?: () => void;
+  onSkipWarmup?: () => void;
+  onResetWarmup?: () => void;
 }
 
 interface ParagraphGroup {
@@ -55,6 +62,10 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   heatmapData,
   onResetHeatmap,
   onOpenStatsModal,
+  warmupStatus,
+  onWordStep,
+  onSkipWarmup,
+  onResetWarmup,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -75,6 +86,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const wordsRef = useRef(words);
   const onTogglePlayRef = useRef(onTogglePlay);
   const onIndexChangeRef = useRef(onIndexChange);
+  const warmupStatusRef = useRef(warmupStatus);
+  const onWordStepRef = useRef(onWordStep);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -83,7 +96,9 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     wordsRef.current = words;
     onTogglePlayRef.current = onTogglePlay;
     onIndexChangeRef.current = onIndexChange;
-  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange]);
+    warmupStatusRef.current = warmupStatus;
+    onWordStepRef.current = onWordStep;
+  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
 
   // Group words by paragraphIndex for paragraph-level focus blur and centering
   const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
@@ -122,6 +137,11 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   // Determine current active paragraph index from currentIndex
   const activeWord = words[currentIndex];
   const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
+
+  const currentWordAnalysis = useMemo(() => {
+    if (!settings.smartPace || !words[currentIndex]) return null;
+    return analyzeWordSmartPace(words[currentIndex]);
+  }, [settings.smartPace, words, currentIndex]);
 
   // Auto-scroll unblurred active paragraph to center of viewport
   const scrollToActiveParagraph = useCallback((smooth = true) => {
@@ -165,7 +185,14 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         words: wordsRef.current,
         startIndex: currentIndexRef.current,
         settings: settingsRef.current,
+        getCurrentWpm: () => {
+          if (warmupStatusRef.current?.isWarmingUp) {
+            return warmupStatusRef.current.currentWpm;
+          }
+          return settingsRef.current.wpm;
+        },
         onWordSync: (syncedIdx) => {
+          onWordStepRef.current?.();
           onIndexChangeRef.current(syncedIdx);
         },
         onFinished: () => {
@@ -191,6 +218,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         return;
       }
 
+      onWordStepRef.current?.();
       const nextIdx = currIdx + 1;
       onIndexChangeRef.current(nextIdx);
 
@@ -201,19 +229,28 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         metronome.playTick(settingsRef.current.metronomeVolume, currentWordObj?.hasSentenceEnd);
       }
 
+      const effectiveWpm = warmupStatusRef.current?.isWarmingUp
+        ? warmupStatusRef.current.currentWpm
+        : settingsRef.current.wpm;
+
       const delay = calculateWordDelayMs(
         currentWordObj,
-        settingsRef.current.wpm,
-        settingsRef.current.smartPunctuationPause
+        effectiveWpm,
+        settingsRef.current.smartPunctuationPause,
+        settingsRef.current.smartPace
       );
 
       timerRef.current = setTimeout(scheduleNextWord, delay);
     };
 
+    const effectiveWpm = warmupStatusRef.current?.isWarmingUp
+      ? warmupStatusRef.current.currentWpm
+      : settings.wpm;
+
     const currentWordObj = words[currentIndexRef.current] || words[0];
     const initialDelay = currentWordObj
-      ? calculateWordDelayMs(currentWordObj, settings.wpm, settings.smartPunctuationPause)
-      : (60 / settings.wpm) * 1000;
+      ? calculateWordDelayMs(currentWordObj, effectiveWpm, settings.smartPunctuationPause, settings.smartPace)
+      : (60 / effectiveWpm) * 1000;
 
     timerRef.current = setTimeout(scheduleNextWord, initialDelay);
 
@@ -233,6 +270,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     settings.speechRateMultiplier,
     settings.wpm,
     settings.smartPunctuationPause,
+    settings.smartPace,
+    settings.warmupMode,
     words
   ]);
 
@@ -539,6 +578,11 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             onWpmChange={(wpm) => onUpdateSettings({ wpm })}
             highlightHex={highlight.hex}
             theme={theme}
+            warmupStatus={warmupStatus}
+            onSkipWarmup={onSkipWarmup}
+            isSmartPaceEnabled={settings.smartPace}
+            smartPaceAnalysis={currentWordAnalysis}
+            onToggleSmartPace={() => onUpdateSettings({ smartPace: !settings.smartPace })}
           />
         </div>
       </div>

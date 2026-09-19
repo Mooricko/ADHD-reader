@@ -20,14 +20,16 @@ import {
   Moon,
   Timer,
   BellOff,
-  Bell
+  Bell,
+  Flame
 } from 'lucide-react';
 import { 
   ReaderSettings, 
   HighlightColor, 
   HighlightStyle, 
   ThemeId, 
-  FontFamily 
+  FontFamily,
+  WarmupStatus
 } from '../types';
 import { 
   THEME_CONFIGS, 
@@ -43,6 +45,8 @@ interface SettingsDrawerProps {
   onUpdateSettings: (updater: Partial<ReaderSettings>) => void;
   onResetDefaults: () => void;
   onOpenTimerModal?: () => void;
+  warmupStatus?: WarmupStatus;
+  onResetWarmup?: () => void;
 }
 
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
@@ -52,6 +56,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   onUpdateSettings,
   onResetDefaults,
   onOpenTimerModal,
+  warmupStatus,
+  onResetWarmup,
 }) => {
   const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
@@ -543,8 +549,151 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 type="checkbox"
                 checked={settings.smartAutoPause !== false}
                 onChange={(e) => onUpdateSettings({ smartAutoPause: e.target.checked })}
-                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
+                className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0 cursor-pointer"
               />
+            </div>
+
+            {/* Smart Pace Feature */}
+            <div className={`p-3.5 rounded-xl border transition-all ${
+              settings.smartPace 
+                ? 'border-indigo-500/40 bg-indigo-500/5 shadow-xs' 
+                : 'border-white/5 bg-black/10'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                    settings.smartPace 
+                      ? 'bg-indigo-500 text-white shadow-xs' 
+                      : `${theme.accentSurface} ${theme.textMuted}`
+                  }`}>
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className={`text-xs font-bold ${theme.textPrimary} flex items-center gap-1.5 flex-wrap`}>
+                      <span>Smart Pace</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-indigo-500/20 text-indigo-300">
+                        Adaptive Speed
+                      </span>
+                    </div>
+                    <div className={`text-[11px] mt-1 ${theme.textMuted} leading-relaxed`}>
+                      Detects word length and syllable complexity, automatically slowing down for longer, more difficult words and speeding up for short, simple ones.
+                    </div>
+                  </div>
+                </div>
+                <input
+                  id="toggle-smart-pace-setting"
+                  type="checkbox"
+                  checked={settings.smartPace}
+                  onChange={(e) => onUpdateSettings({ smartPace: e.target.checked })}
+                  className="w-4 h-4 rounded text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer mt-1"
+                />
+              </div>
+
+              {settings.smartPace && (
+                <div className="mt-3 pt-2.5 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="flex items-center gap-1.5 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                    <span className="font-bold">⚡ Short Words:</span>
+                    <span className="opacity-90">15%–35% faster</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                    <span className="font-bold">⏳ Complex Words:</span>
+                    <span className="opacity-90">20%–45% slower</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Warm-up Mode Feature */}
+            <div className={`p-3.5 rounded-xl border transition-all ${
+              settings.warmupMode 
+                ? 'border-amber-500/40 bg-amber-500/5 shadow-xs' 
+                : 'border-white/5 bg-black/10'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                    settings.warmupMode 
+                      ? 'bg-amber-500 text-white shadow-xs' 
+                      : `${theme.accentSurface} ${theme.textMuted}`
+                  }`}>
+                    <Flame className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className={`text-xs font-bold ${theme.textPrimary} flex items-center gap-1.5 flex-wrap`}>
+                      <span>Warm-up Mode</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-amber-500/20 text-amber-300">
+                        First 300 Words
+                      </span>
+                    </div>
+                    <div className={`text-[11px] mt-1 ${theme.textMuted} leading-relaxed`}>
+                      Gradually increases reading speed from your starting speed to target {settings.wpm} WPM over the first 300 words of a session to help you settle in.
+                    </div>
+                  </div>
+                </div>
+                <input
+                  id="toggle-warmup-mode-setting"
+                  type="checkbox"
+                  checked={settings.warmupMode}
+                  onChange={(e) => onUpdateSettings({ warmupMode: e.target.checked })}
+                  className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 focus:ring-offset-0 cursor-pointer mt-1"
+                />
+              </div>
+
+              {settings.warmupMode && (
+                <div className="mt-3 pt-3 border-t border-white/5 space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className={theme.textMuted}>Warm-up Starting Speed:</span>
+                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                      {settings.warmupStartWpm || 180} WPM
+                    </span>
+                  </div>
+
+                  <input
+                    id="slider-warmup-start-wpm"
+                    type="range"
+                    min={80}
+                    max={Math.max(100, Math.min(settings.wpm, 500))}
+                    step={10}
+                    value={Math.min(settings.warmupStartWpm || 180, settings.wpm)}
+                    onChange={(e) => onUpdateSettings({ warmupStartWpm: parseInt(e.target.value, 10) })}
+                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Starts at {settings.warmupStartWpm || 180} WPM</span>
+                    <span>Smoothly reaches {settings.wpm} WPM at word 300</span>
+                  </div>
+
+                  {warmupStatus && (
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-black/20 border border-white/5 text-[11px] gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400">Session progress:</span>
+                        <span className="font-mono font-semibold text-amber-300">
+                          {warmupStatus.sessionWordsRead} / {warmupStatus.totalWarmupWords} words
+                        </span>
+                        {warmupStatus.isWarmingUp ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono">
+                            Current: {warmupStatus.currentWpm} WPM
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">
+                            Full Speed Active
+                          </span>
+                        )}
+                      </div>
+                      {onResetWarmup && (
+                        <button
+                          type="button"
+                          onClick={onResetWarmup}
+                          className="px-2 py-1 rounded border border-white/10 text-slate-300 hover:text-white hover:bg-white/5 text-[10px] transition-colors"
+                        >
+                          Restart Ramp
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Reading Complexity Heatmap */}

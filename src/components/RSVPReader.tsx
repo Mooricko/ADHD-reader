@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { 
   Play, 
   Pause, 
@@ -16,12 +16,14 @@ import {
   Volume2,
   VolumeX,
   Headphones,
-  Sparkles
+  Sparkles,
+  Flame
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData } from '../types';
+import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData, WarmupStatus } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
+import { analyzeWordSmartPace } from '../utils/smartPacing';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
@@ -46,6 +48,10 @@ interface RSVPReaderProps {
   isAutoPaused?: boolean;
   autoPauseReason?: AutoPauseReason | null;
   onResume?: () => void;
+  warmupStatus?: WarmupStatus;
+  onWordStep?: () => void;
+  onSkipWarmup?: () => void;
+  onResetWarmup?: () => void;
 }
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
@@ -64,6 +70,10 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   isAutoPaused = false,
   autoPauseReason = null,
   onResume,
+  warmupStatus,
+  onWordStep,
+  onSkipWarmup,
+  onResetWarmup,
 }) => {
   const theme = THEME_CONFIGS[settings.theme];
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
@@ -77,6 +87,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   const wordsRef = useRef(words);
   const onTogglePlayRef = useRef(onTogglePlay);
   const onIndexChangeRef = useRef(onIndexChange);
+  const warmupStatusRef = useRef(warmupStatus);
+  const onWordStepRef = useRef(onWordStep);
 
   // Keep refs updated for timer recursion without re-binding
   useEffect(() => {
@@ -86,7 +98,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     wordsRef.current = words;
     onTogglePlayRef.current = onTogglePlay;
     onIndexChangeRef.current = onIndexChange;
-  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange]);
+    warmupStatusRef.current = warmupStatus;
+    onWordStepRef.current = onWordStep;
+  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
 
   // Main playback loop (Web Speech API Narration OR Visual RSVP Timer)
   useEffect(() => {
@@ -110,7 +124,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         words: wordsRef.current,
         startIndex: currentIndexRef.current,
         settings: settingsRef.current,
+        getCurrentWpm: () => {
+          if (warmupStatusRef.current?.isWarmingUp) {
+            return warmupStatusRef.current.currentWpm;
+          }
+          return settingsRef.current.wpm;
+        },
         onWordSync: (syncedIdx) => {
+          onWordStepRef.current?.();
           onIndexChangeRef.current(syncedIdx);
           if (settingsRef.current.metronomeSound) {
             const currentW = wordsRef.current[syncedIdx];
@@ -141,7 +162,6 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
 
       const currIdx = currentIndexRef.current;
       const allWords = wordsRef.current;
-      const step = settingsRef.current.chunkSize || 1;
 
       if (currIdx >= allWords.length - 1) {
         // Reached the end of text!
@@ -156,6 +176,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         return;
       }
 
+      // Track word read in this session for Warm-up ramp
+      onWordStepRef.current?.();
+
       // Always advance word-by-word so the vertical reel swipes to each word smoothly
       const nextIdx = Math.min(allWords.length - 1, currIdx + 1);
       onIndexChangeRef.current(nextIdx);
@@ -166,24 +189,39 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         metronome.playTick(settingsRef.current.metronomeVolume, nextWord?.hasSentenceEnd);
       }
 
-      // Calculate duration for this word
+      // Determine effective speed (warm-up speed or configured target)
+      const currentEffectiveWpm = warmupStatusRef.current?.isWarmingUp
+        ? warmupStatusRef.current.currentWpm
+        : settingsRef.current.wpm;
+
+      // Calculate duration for this word with Smart Pace and natural punctuation pauses
       let wordDelay = calculateWordDelayMs(
         allWords[nextIdx],
-        settingsRef.current.wpm,
-        settingsRef.current.smartPunctuationPause
+        currentEffectiveWpm,
+        settingsRef.current.smartPunctuationPause,
+        settingsRef.current.smartPace
       );
       if (wordDelay <= 0) {
-        wordDelay = (60 / settingsRef.current.wpm) * 1000;
+        wordDelay = (60 / currentEffectiveWpm) * 1000;
       }
 
       timerRef.current = setTimeout(scheduleNextWord, wordDelay);
     };
 
     // Calculate initial delay for the first word
+    const currentEffectiveWpm = warmupStatusRef.current?.isWarmingUp
+      ? warmupStatusRef.current.currentWpm
+      : settings.wpm;
+
     const currentWord = words[currentIndexRef.current] || words[0];
-    let initialDelay = calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause);
+    let initialDelay = calculateWordDelayMs(
+      currentWord, 
+      currentEffectiveWpm, 
+      settings.smartPunctuationPause,
+      settings.smartPace
+    );
     if (initialDelay <= 0) {
-      initialDelay = (60 / settings.wpm) * 1000;
+      initialDelay = (60 / currentEffectiveWpm) * 1000;
     }
 
     if (settings.metronomeSound && currentWord) {
@@ -208,6 +246,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     settings.speechRateMultiplier, 
     settings.wpm, 
     settings.smartPunctuationPause, 
+    settings.smartPace,
+    settings.warmupMode,
     settings.metronomeSound, 
     settings.metronomeVolume, 
     words
@@ -225,7 +265,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         words: wordsRef.current,
         startIndex: newIdx,
         settings: settingsRef.current,
+        getCurrentWpm: () => {
+          if (warmupStatusRef.current?.isWarmingUp) {
+            return warmupStatusRef.current.currentWpm;
+          }
+          return settingsRef.current.wpm;
+        },
         onWordSync: (syncedIdx) => {
+          onWordStepRef.current?.();
           onIndexChange(syncedIdx);
           if (settingsRef.current.metronomeSound) {
             metronome.playTick(settingsRef.current.metronomeVolume, wordsRef.current[syncedIdx]?.hasSentenceEnd);
@@ -293,6 +340,11 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
 
   const prevWord = currentIndex > 0 ? words[currentIndex - 1] : null;
   const nextWord = currentIndex < words.length - 1 ? words[currentIndex + 1] : null;
+
+  const currentWordAnalysis = useMemo(() => {
+    if (!settings.smartPace || !words[currentIndex]) return null;
+    return analyzeWordSmartPace(words[currentIndex]);
+  }, [settings.smartPace, words, currentIndex]);
 
   // Calculate progress & remaining time
   const progressPercent = words.length > 0 ? Math.round(((currentIndex + 1) / words.length) * 100) : 0;
@@ -406,9 +458,61 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             <span className="hidden sm:inline">Morph</span>
           </button>
 
-          <span className={`text-xs font-mono font-semibold px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textPrimary}`}>
-            <span style={{ color: highlight.hex }}>{settings.wpm}</span> <span className={theme.textMuted}>WPM</span>
-          </span>
+          {/* Smart Pace Quick Toggle */}
+          <button
+            id="toggle-smart-pace-btn"
+            type="button"
+            onClick={() => onUpdateSettings({ smartPace: !settings.smartPace })}
+            title={
+              settings.smartPace
+                ? 'Smart Pace: ON (Dynamically adapts speed to word complexity & length)'
+                : 'Smart Pace: OFF (Click to enable)'
+            }
+            aria-label="Toggle Smart Pace"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono transition-all ${
+              settings.smartPace
+                ? 'font-bold shadow-xs'
+                : `${theme.borderClass} ${theme.textMuted} opacity-70 hover:opacity-100`
+            }`}
+            style={
+              settings.smartPace
+                ? {
+                    borderColor: `${highlight.hex}60`,
+                    color: highlight.hex,
+                    backgroundColor: `${highlight.hex}18`,
+                  }
+                : undefined
+            }
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Smart Pace</span>
+          </button>
+
+          {warmupStatus?.isWarmingUp ? (
+            <div 
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-mono"
+              title={`Warm-up Mode: Reading at ${warmupStatus.currentWpm} WPM, smoothly increasing to target ${settings.wpm} WPM (${warmupStatus.sessionWordsRead}/${warmupStatus.totalWarmupWords} words)`}
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <span className="font-bold text-amber-300">{warmupStatus.currentWpm}</span>
+              <span className="text-[10px] text-amber-400/80">→ {settings.wpm}</span>
+              <span className="text-[10px] text-amber-400/60 hidden md:inline">({warmupStatus.sessionWordsRead}/300)</span>
+              {onSkipWarmup && (
+                <button
+                  type="button"
+                  onClick={onSkipWarmup}
+                  className="ml-1 text-[10px] underline text-amber-200 hover:text-white"
+                  title="Skip warm-up to reach target speed immediately"
+                >
+                  Skip
+                </button>
+              )}
+            </div>
+          ) : (
+            <span className={`text-xs font-mono font-semibold px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textPrimary}`}>
+              <span style={{ color: highlight.hex }}>{settings.wpm}</span> <span className={theme.textMuted}>WPM</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -717,6 +821,11 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             onWpmChange={(wpm) => onUpdateSettings({ wpm })}
             highlightHex={highlight.hex}
             theme={theme}
+            warmupStatus={warmupStatus}
+            onSkipWarmup={onSkipWarmup}
+            isSmartPaceEnabled={settings.smartPace}
+            smartPaceAnalysis={currentWordAnalysis}
+            onToggleSmartPace={() => onUpdateSettings({ smartPace: !settings.smartPace })}
           />
         </div>
       </div>

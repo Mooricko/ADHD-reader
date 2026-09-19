@@ -31,6 +31,7 @@ import {
 } from './utils/extensionBridge';
 import { useReadingHeatmap } from './hooks/useReadingHeatmap';
 import { useSmartAutoPause, AutoPauseReason } from './hooks/useSmartAutoPause';
+import { calculateWarmupStatus, WARMUP_TOTAL_WORDS } from './utils/smartPacing';
 import { CheckCircle2, Zap, Upload } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
@@ -60,6 +61,9 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   doNotDisturb: false,
   showHeatmapProgress: true,
   smartAutoPause: true,
+  smartPace: true,
+  warmupMode: false,
+  warmupStartWpm: 180,
 };
 
 const STORAGE_KEYS = {
@@ -94,6 +98,11 @@ export default function App() {
           if (typeof merged.doNotDisturb !== 'boolean') merged.doNotDisturb = false;
           if (typeof merged.showHeatmapProgress !== 'boolean') merged.showHeatmapProgress = true;
           if (typeof merged.smartAutoPause !== 'boolean') merged.smartAutoPause = true;
+          if (typeof merged.smartPace !== 'boolean') merged.smartPace = true;
+          if (typeof merged.warmupMode !== 'boolean') merged.warmupMode = false;
+          if (typeof merged.warmupStartWpm !== 'number' || isNaN(merged.warmupStartWpm) || merged.warmupStartWpm < 50) {
+            merged.warmupStartWpm = 180;
+          }
           return merged;
         }
       }
@@ -246,6 +255,30 @@ export default function App() {
       setToastNotification((curr) => (curr === msg ? null : curr));
     }, 4000);
   }, [isTimerSet, settings.doNotDisturb]);
+
+  // Warm-up Mode Session Tracking (Gradually increases speed over first 300 words)
+  const [sessionWordsRead, setSessionWordsRead] = useState(0);
+
+  const warmupStatus = useMemo(() => {
+    return calculateWarmupStatus(
+      settings.wpm,
+      settings.warmupMode,
+      settings.warmupStartWpm || 180,
+      sessionWordsRead
+    );
+  }, [sessionWordsRead, settings.warmupStartWpm, settings.wpm, settings.warmupMode]);
+
+  const handleWordStep = useCallback(() => {
+    setSessionWordsRead((prev) => prev + 1);
+  }, []);
+
+  const handleSkipWarmup = useCallback(() => {
+    setSessionWordsRead(WARMUP_TOTAL_WORDS);
+  }, []);
+
+  const handleResetWarmup = useCallback(() => {
+    setSessionWordsRead(0);
+  }, []);
 
   // 6. Window-level Drag & Drop for Universal Input Hub
   const [isWindowDragging, setIsWindowDragging] = useState(false);
@@ -400,6 +433,7 @@ export default function App() {
     setCurrentTitle(validTitle);
     setCurrentIndex(0);
     setIsPlaying(false);
+    setSessionWordsRead(0);
 
     try {
       safeStorage.setItem(STORAGE_KEYS.CURRENT_TEXT, validText);
@@ -599,6 +633,7 @@ export default function App() {
     setIsAutoPaused(false);
     setAutoPauseReason(null);
     setIsPlaying(false);
+    setSessionWordsRead(0);
     handleIndexChange(0);
   }, [handleIndexChange]);
 
@@ -818,6 +853,10 @@ export default function App() {
             isAutoPaused={isAutoPaused}
             autoPauseReason={autoPauseReason}
             onResume={handleTogglePlay}
+            warmupStatus={warmupStatus}
+            onWordStep={handleWordStep}
+            onSkipWarmup={handleSkipWarmup}
+            onResetWarmup={handleResetWarmup}
           />
         ) : (
           <FlowReader
@@ -834,6 +873,10 @@ export default function App() {
             heatmapData={heatmapData}
             onResetHeatmap={resetHeatmap}
             onOpenStatsModal={() => setIsStatsModalOpen(true)}
+            warmupStatus={warmupStatus}
+            onWordStep={handleWordStep}
+            onSkipWarmup={handleSkipWarmup}
+            onResetWarmup={handleResetWarmup}
           />
         )}
       </main>
@@ -892,6 +935,8 @@ export default function App() {
         onUpdateSettings={handleUpdateSettings}
         onResetDefaults={handleResetDefaults}
         onOpenTimerModal={() => setIsTimerModalOpen(true)}
+        warmupStatus={warmupStatus}
+        onResetWarmup={handleResetWarmup}
       />
 
       <KeyboardShortcutsModal

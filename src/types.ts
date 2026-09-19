@@ -50,6 +50,29 @@ export interface ReaderSettings {
   doNotDisturb: boolean; // Turns off all notifications when timer is set
   showHeatmapProgress: boolean; // Visual reading progress indicator with color gradient heatmap for complex sections
   smartAutoPause: boolean; // Auto-pauses RSVP reader when mouse leaves window or window loses focus
+  smartPace: boolean; // Automatically slows down for longer/difficult words and speeds up for short/simple ones
+  warmupMode: boolean; // Gradually increases WPM from starting speed to target WPM over first 300 words
+  warmupStartWpm: number; // User-defined starting speed for Warm-up Mode (e.g. 180 WPM)
+}
+
+export interface SmartPaceAnalysis {
+  multiplier: number; // e.g. 0.75x to 1.65x
+  length: number;
+  syllables: number;
+  complexityCategory: 'simple' | 'standard' | 'moderate' | 'difficult';
+  speedCategory: 'fast' | 'normal' | 'slower' | 'slowest';
+  reasons: string[];
+}
+
+export interface WarmupStatus {
+  isActive: boolean;
+  isWarmingUp: boolean;
+  targetWpm: number;
+  startWpm: number;
+  currentWpm: number;
+  sessionWordsRead: number;
+  totalWarmupWords: number;
+  progressPercent: number;
 }
 
 export type ComplexityLevel = 'unread' | 'low' | 'moderate' | 'high' | 'peak';

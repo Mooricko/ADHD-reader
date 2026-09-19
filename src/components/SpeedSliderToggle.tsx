@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
-import { Minus, Plus, Gauge } from 'lucide-react';
+import { Minus, Plus, Gauge, Flame, Zap } from 'lucide-react';
 import { ThemeConfig } from '../utils/themeStyles';
+import { WarmupStatus, SmartPaceAnalysis } from '../types';
 
 interface SpeedSliderToggleProps {
   wpm: number;
@@ -9,6 +10,11 @@ interface SpeedSliderToggleProps {
   theme: ThemeConfig;
   minWpm?: number;
   maxWpm?: number;
+  warmupStatus?: WarmupStatus;
+  onSkipWarmup?: () => void;
+  smartPaceAnalysis?: SmartPaceAnalysis | null;
+  isSmartPaceEnabled?: boolean;
+  onToggleSmartPace?: () => void;
 }
 
 export const SPEED_PRESETS = [180, 250, 320, 420, 550, 700];
@@ -20,6 +26,11 @@ export const SpeedSliderToggle: React.FC<SpeedSliderToggleProps> = ({
   theme,
   minWpm = 100,
   maxWpm = 800,
+  warmupStatus,
+  onSkipWarmup,
+  smartPaceAnalysis,
+  isSmartPaceEnabled,
+  onToggleSmartPace,
 }) => {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -67,15 +78,72 @@ export const SpeedSliderToggle: React.FC<SpeedSliderToggleProps> = ({
     <div className="w-full flex flex-col gap-2 select-none">
       {/* Header bar: Label & Fine-tune steppers */}
       <div className="flex items-center justify-between text-xs">
-        <div className="flex items-center gap-1.5 font-medium">
+        <div className="flex items-center gap-1.5 font-medium flex-wrap">
           <Gauge className="w-3.5 h-3.5 text-slate-400" />
-          <span className={theme.textMuted}>Speed (WPM):</span>
+          <span className={theme.textMuted}>Target Speed:</span>
           <span 
             className="font-mono font-bold px-2 py-0.5 rounded-md text-xs border border-white/10"
             style={{ color: highlightHex, backgroundColor: `${highlightHex}15` }}
           >
             {wpm} WPM
           </span>
+
+          {warmupStatus?.isWarmingUp && (
+            <span 
+              className="inline-flex items-center gap-1 font-mono font-semibold px-2 py-0.5 rounded-md text-[11px] border border-amber-500/30 text-amber-400 bg-amber-500/10 animate-pulse"
+              title={`Warm-up active: reading at ${warmupStatus.currentWpm} WPM, smoothly increasing to ${wpm} WPM (${warmupStatus.sessionWordsRead}/${warmupStatus.totalWarmupWords} words)`}
+            >
+              <Flame className="w-3 h-3 text-amber-400" />
+              <span>Now: {warmupStatus.currentWpm} WPM</span>
+              {onSkipWarmup && (
+                <button
+                  type="button"
+                  onClick={onSkipWarmup}
+                  className="ml-1 underline text-[10px] text-amber-300 hover:text-white cursor-pointer"
+                  title="Skip warm-up to reach target speed immediately"
+                >
+                  Skip
+                </button>
+              )}
+            </span>
+          )}
+
+          {/* Smart Pace Live Status Chip (Relocated to Player Panel) */}
+          {isSmartPaceEnabled && (
+            <button
+              id="player-smart-pace-chip"
+              type="button"
+              onClick={onToggleSmartPace}
+              className={`inline-flex items-center gap-1.5 font-mono font-medium px-2.5 py-0.5 rounded-md text-[11px] border transition-all cursor-pointer ${
+                smartPaceAnalysis?.speedCategory === 'fast'
+                  ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/15 shadow-xs'
+                  : smartPaceAnalysis?.speedCategory === 'slower' || smartPaceAnalysis?.speedCategory === 'slowest'
+                  ? 'border-amber-500/40 text-amber-300 bg-amber-500/15 shadow-xs'
+                  : 'border-indigo-500/30 text-indigo-300 bg-indigo-500/10'
+              }`}
+              title={
+                smartPaceAnalysis
+                  ? `Smart Pace active: ${smartPaceAnalysis.reasons.join(', ') || 'Standard word pace'} (Click to toggle)`
+                  : 'Smart Pace active (Click to toggle)'
+              }
+            >
+              <Zap className={`w-3 h-3 ${
+                smartPaceAnalysis?.speedCategory === 'fast'
+                  ? 'text-emerald-400'
+                  : smartPaceAnalysis?.speedCategory === 'slower' || smartPaceAnalysis?.speedCategory === 'slowest'
+                  ? 'text-amber-400'
+                  : 'text-indigo-400'
+              }`} />
+              <span className="hidden sm:inline font-semibold">Smart Pace:</span>
+              <span>
+                {smartPaceAnalysis?.speedCategory === 'fast'
+                  ? `Swift (-${Math.round((1 - smartPaceAnalysis.multiplier) * 100)}%)`
+                  : smartPaceAnalysis?.speedCategory === 'slower' || smartPaceAnalysis?.speedCategory === 'slowest'
+                  ? `Complex (+${Math.round((smartPaceAnalysis.multiplier - 1) * 100)}%)`
+                  : 'Steady'}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Nudge - / + buttons for micro-adjustments */}

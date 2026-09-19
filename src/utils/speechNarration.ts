@@ -342,6 +342,7 @@ class SpeechNarrationService {
     onWordSync,
     onFinished,
     isPlayingCheck,
+    getCurrentWpm,
   }: {
     words: HighlightedWordParts[];
     startIndex: number;
@@ -349,6 +350,7 @@ class SpeechNarrationService {
     onWordSync: WordSyncCallback;
     onFinished: FinishedCallback;
     isPlayingCheck: () => boolean;
+    getCurrentWpm?: () => number;
   }): void {
     if (startIndex >= words.length) {
       onFinished();
@@ -361,6 +363,9 @@ class SpeechNarrationService {
     this.hasReceivedBoundary = false;
     this.lastReportedWordIndex = startIndex - 1;
 
+    const currentWpm = getCurrentWpm ? getCurrentWpm() : settings.wpm;
+    const isWarmingUp = Boolean(settings.warmupMode && currentWpm < settings.wpm);
+
     // Handle Persian Web Audio Synthesizer Provider Mode
     if (settings.speechVoiceURI === 'farsi-webaudio-synth') {
       this.playPersianSynthWordByWord({
@@ -371,6 +376,7 @@ class SpeechNarrationService {
         onFinished,
         isPlayingCheck,
         utteranceId,
+        getCurrentWpm,
       });
       return;
     }
@@ -378,12 +384,14 @@ class SpeechNarrationService {
     const synth = this.getSynth();
     if (!synth || !this.isSupported()) return;
 
-    // 1. Determine a natural chunk (up to sentence end or 25 words max)
+    // 1. Determine a natural chunk:
+    // When warming up, use smaller, naturally-bounded chunks (5-8 words or clause pauses)
+    // so speech acceleration matches visual warm-up ramp between phrases without audio clipping.
     let endIndex = startIndex;
-    const maxChunkSize = 25;
+    const maxChunkSize = isWarmingUp ? 8 : 25;
     while (endIndex < words.length - 1 && (endIndex - startIndex) < maxChunkSize) {
       const w = words[endIndex];
-      if (w.hasSentenceEnd || w.hasParagraphBreak) {
+      if (w.hasSentenceEnd || w.hasParagraphBreak || (isWarmingUp && (w.hasClausePause || w.original.endsWith(',')))) {
         break;
       }
       endIndex++;
@@ -425,6 +433,7 @@ class SpeechNarrationService {
           onWordSync,
           onFinished,
           isPlayingCheck,
+          getCurrentWpm,
         });
       } else {
         onFinished();
@@ -448,7 +457,8 @@ class SpeechNarrationService {
 
     utterance.pitch = Math.max(0.5, Math.min(1.5, settings.speechPitch || 1.0));
     utterance.volume = Math.max(0, Math.min(1, settings.speechVolume ?? 1.0));
-    utterance.rate = this.computeSpeechRate(settings.wpm, settings.speechRateMultiplier || 1.0);
+    // Calculate rate dynamically based on current effective warm-up WPM
+    utterance.rate = this.computeSpeechRate(currentWpm, settings.speechRateMultiplier || 1.0);
 
     // 4. Synchronize word boundary events with visual RSVP
     utterance.onboundary = (event: SpeechSynthesisEvent) => {
@@ -517,6 +527,7 @@ class SpeechNarrationService {
           onWordSync,
           onFinished,
           isPlayingCheck,
+          getCurrentWpm,
         });
       } else {
         this.isSpeaking = false;
@@ -551,6 +562,7 @@ class SpeechNarrationService {
       words,
       chunkStartIndex: startIndex,
       chunkEndIndex: endIndex,
+      effectiveWpm: currentWpm,
       settings,
       onWordSync,
       isPlayingCheck,
@@ -569,6 +581,7 @@ class SpeechNarrationService {
     onFinished,
     isPlayingCheck,
     utteranceId,
+    getCurrentWpm,
   }: {
     words: HighlightedWordParts[];
     index: number;
@@ -577,6 +590,7 @@ class SpeechNarrationService {
     onFinished: FinishedCallback;
     isPlayingCheck: () => boolean;
     utteranceId: number;
+    getCurrentWpm?: () => number;
   }): void {
     if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
 
@@ -589,10 +603,13 @@ class SpeechNarrationService {
     const currentWord = words[index];
     onWordSync(index);
 
+    const effectiveWpm = getCurrentWpm ? getCurrentWpm() : settings.wpm;
+
     const delay = calculateWordDelayMs(
       currentWord,
-      settings.wpm,
-      settings.smartPunctuationPause
+      effectiveWpm,
+      settings.smartPunctuationPause,
+      settings.smartPace
     );
 
     // Synthesize Persian word acoustics
@@ -613,6 +630,7 @@ class SpeechNarrationService {
         onFinished,
         isPlayingCheck,
         utteranceId,
+        getCurrentWpm,
       });
     }, delay);
   }
@@ -624,6 +642,7 @@ class SpeechNarrationService {
     words,
     chunkStartIndex,
     chunkEndIndex,
+    effectiveWpm,
     settings,
     onWordSync,
     isPlayingCheck,
@@ -632,6 +651,7 @@ class SpeechNarrationService {
     words: HighlightedWordParts[];
     chunkStartIndex: number;
     chunkEndIndex: number;
+    effectiveWpm: number;
     settings: ReaderSettings;
     onWordSync: WordSyncCallback;
     isPlayingCheck: () => boolean;
@@ -651,7 +671,7 @@ class SpeechNarrationService {
         }
 
         const word = words[currentIdx];
-        const delay = calculateWordDelayMs(word, settings.wpm, settings.smartPunctuationPause);
+        const delay = calculateWordDelayMs(word, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
         currentIdx++;
 
         this.fallbackTimer = setTimeout(stepWord, delay);
@@ -659,7 +679,7 @@ class SpeechNarrationService {
     };
 
     const initialWord = words[chunkStartIndex];
-    const initialDelay = calculateWordDelayMs(initialWord, settings.wpm, settings.smartPunctuationPause);
+    const initialDelay = calculateWordDelayMs(initialWord, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
     this.fallbackTimer = setTimeout(stepWord, initialDelay);
   }
 }
