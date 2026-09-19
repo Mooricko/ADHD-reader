@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { Minus, Plus, Gauge, Flame, Zap } from 'lucide-react';
+import { Minus, Plus, Gauge, Flame, Zap, MoveHorizontal } from 'lucide-react';
 import { ThemeConfig } from '../utils/themeStyles';
 import { WarmupStatus, SmartPaceAnalysis } from '../types';
 
@@ -15,6 +15,9 @@ interface SpeedSliderToggleProps {
   smartPaceAnalysis?: SmartPaceAnalysis | null;
   isSmartPaceEnabled?: boolean;
   onToggleSmartPace?: () => void;
+  isDriftEnabled?: boolean;
+  driftOffset?: number;
+  onToggleDrift?: () => void;
 }
 
 export const SPEED_PRESETS = [180, 250, 320, 420, 550, 700];
@@ -31,6 +34,9 @@ export const SpeedSliderToggle: React.FC<SpeedSliderToggleProps> = ({
   smartPaceAnalysis,
   isSmartPaceEnabled,
   onToggleSmartPace,
+  isDriftEnabled,
+  driftOffset,
+  onToggleDrift,
 }) => {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -141,6 +147,29 @@ export const SpeedSliderToggle: React.FC<SpeedSliderToggleProps> = ({
                   : smartPaceAnalysis?.speedCategory === 'slower' || smartPaceAnalysis?.speedCategory === 'slowest'
                   ? `Complex (+${Math.round((smartPaceAnalysis.multiplier - 1) * 100)}%)`
                   : 'Steady'}
+              </span>
+            </button>
+          )}
+
+          {/* Drift Animation Live Status Chip */}
+          {isDriftEnabled && (
+            <button
+              id="player-drift-chip"
+              type="button"
+              onClick={onToggleDrift}
+              className="inline-flex items-center gap-1.5 font-mono font-medium px-2.5 py-0.5 rounded-md text-[11px] border border-cyan-500/30 text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all cursor-pointer shadow-xs"
+              title={
+                driftOffset !== undefined && driftOffset !== 0
+                  ? `Drift Animation active: ${driftOffset > 0 ? `+${driftOffset}px right` : `${driftOffset}px left`} (Click to toggle)`
+                  : 'Drift Animation active: Centered (Click to toggle)'
+              }
+            >
+              <MoveHorizontal className="w-3 h-3 text-cyan-400" />
+              <span className="hidden sm:inline font-semibold">Drift:</span>
+              <span>
+                {driftOffset !== undefined && driftOffset !== 0
+                  ? (driftOffset > 0 ? `+${driftOffset}px` : `${driftOffset}px`)
+                  : 'Center'}
               </span>
             </button>
           )}

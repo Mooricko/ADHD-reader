@@ -21,7 +21,8 @@ import {
   Timer,
   BellOff,
   Bell,
-  Flame
+  Flame,
+  MoveHorizontal
 } from 'lucide-react';
 import { 
   ReaderSettings, 
@@ -37,6 +38,7 @@ import {
   FONT_CONFIGS 
 } from '../utils/themeStyles';
 import { speechNarrator, VoiceOption } from '../utils/speechNarration';
+import { DRIFT_INTENSITY_CONFIGS, DriftIntensity } from '../utils/driftAnimation';
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -529,6 +531,80 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 onChange={(e) => onUpdateSettings({ showReticleGuides: e.target.checked })}
                 className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0"
               />
+            </div>
+
+            {/* Drift Animation (Anti-Fatigue Saccadic Shift) */}
+            <div className={`p-3.5 rounded-xl border transition-all ${
+              settings.driftAnimation 
+                ? 'border-cyan-500/40 bg-cyan-500/5 shadow-xs' 
+                : 'border-white/5 bg-black/10'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                    settings.driftAnimation 
+                      ? 'bg-cyan-500 text-white shadow-xs' 
+                      : `${theme.accentSurface} ${theme.textMuted}`
+                  }`}>
+                    <MoveHorizontal className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className={`text-xs font-semibold ${theme.textPrimary} flex items-center gap-1.5`}>
+                      <span>Drift Animation</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-medium">
+                        Anti-Fatigue
+                      </span>
+                    </div>
+                    <div className={`text-[11px] ${theme.textMuted} mt-0.5 max-w-xs`}>
+                      Slightly shifts the active word horizontally every few phrases, preventing visual fatigue, gaze-lock, and retinal fading from fixed-point staring.
+                    </div>
+                  </div>
+                </div>
+                <input
+                  id="toggle-drift-animation"
+                  type="checkbox"
+                  checked={settings.driftAnimation}
+                  onChange={(e) => onUpdateSettings({ driftAnimation: e.target.checked })}
+                  className="w-4 h-4 rounded text-red-500 focus:ring-red-500 focus:ring-offset-0 cursor-pointer mt-1"
+                />
+              </div>
+
+              {settings.driftAnimation && (
+                <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className={theme.textMuted}>Drift Amplitude</span>
+                    <span className="font-mono text-cyan-400 font-semibold">
+                      {DRIFT_INTENSITY_CONFIGS[settings.driftIntensity || 'moderate'].maxOffset}
+                    </span>
+                  </div>
+
+                  <div className={`grid grid-cols-3 p-1 rounded-xl border ${theme.borderClass} ${theme.accentSurface} gap-1`}>
+                    {(['subtle', 'moderate', 'dynamic'] as const).map((level) => {
+                      const isSelected = (settings.driftIntensity || 'moderate') === level;
+                      const conf = DRIFT_INTENSITY_CONFIGS[level];
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => onUpdateSettings({ driftIntensity: level })}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            isSelected
+                              ? 'text-white shadow-xs'
+                              : `${theme.textMuted} hover:${theme.textPrimary}`
+                          }`}
+                          style={isSelected ? { backgroundColor: highlight.hex } : undefined}
+                        >
+                          <span className="capitalize">{conf.label}</span>
+                          <span className="text-[9px] opacity-80 font-mono">{conf.maxOffset}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={`text-[10px] ${theme.textMuted} italic text-center pt-0.5`}>
+                    {DRIFT_INTENSITY_CONFIGS[settings.driftIntensity || 'moderate'].description}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Smart Auto-Pause */}

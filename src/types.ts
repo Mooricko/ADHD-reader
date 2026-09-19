@@ -53,6 +53,8 @@ export interface ReaderSettings {
   smartPace: boolean; // Automatically slows down for longer/difficult words and speeds up for short/simple ones
   warmupMode: boolean; // Gradually increases WPM from starting speed to target WPM over first 300 words
   warmupStartWpm: number; // User-defined starting speed for Warm-up Mode (e.g. 180 WPM)
+  driftAnimation: boolean; // Subtle horizontal drift of active word to prevent fixed-point staring visual fatigue
+  driftIntensity: 'subtle' | 'moderate' | 'dynamic'; // Intensity amplitude of horizontal drift
 }
 
 export interface SmartPaceAnalysis {

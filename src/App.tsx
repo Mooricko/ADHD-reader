@@ -64,6 +64,8 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   smartPace: true,
   warmupMode: false,
   warmupStartWpm: 180,
+  driftAnimation: false,
+  driftIntensity: 'moderate',
 };
 
 const STORAGE_KEYS = {
@@ -102,6 +104,10 @@ export default function App() {
           if (typeof merged.warmupMode !== 'boolean') merged.warmupMode = false;
           if (typeof merged.warmupStartWpm !== 'number' || isNaN(merged.warmupStartWpm) || merged.warmupStartWpm < 50) {
             merged.warmupStartWpm = 180;
+          }
+          if (typeof merged.driftAnimation !== 'boolean') merged.driftAnimation = false;
+          if (!['subtle', 'moderate', 'dynamic'].includes(merged.driftIntensity as string)) {
+            merged.driftIntensity = 'moderate';
           }
           return merged;
         }

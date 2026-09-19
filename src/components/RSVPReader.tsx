@@ -17,13 +17,15 @@ import {
   VolumeX,
   Headphones,
   Sparkles,
-  Flame
+  Flame,
+  MoveHorizontal
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData, WarmupStatus } from '../types';
 import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { analyzeWordSmartPace } from '../utils/smartPacing';
+import { precalculateDriftOffsets } from '../utils/driftAnimation';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
@@ -346,6 +348,13 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     return analyzeWordSmartPace(words[currentIndex]);
   }, [settings.smartPace, words, currentIndex]);
 
+  // Pre-calculated horizontal drift offsets to relieve fixed-point staring fatigue
+  const driftOffsets = useMemo(() => {
+    return precalculateDriftOffsets(words, settings.driftIntensity, settings.driftAnimation);
+  }, [words, settings.driftIntensity, settings.driftAnimation]);
+
+  const currentDriftOffset = settings.driftAnimation ? (driftOffsets[currentIndex] ?? 0) : 0;
+
   // Calculate progress & remaining time
   const progressPercent = words.length > 0 ? Math.round(((currentIndex + 1) / words.length) * 100) : 0;
   const wordsRemaining = Math.max(0, words.length - 1 - currentIndex);
@@ -488,6 +497,36 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             <span className="hidden sm:inline">Smart Pace</span>
           </button>
 
+          {/* Drift Animation Quick Toggle */}
+          <button
+            id="toggle-drift-animation-btn"
+            type="button"
+            onClick={() => onUpdateSettings({ driftAnimation: !settings.driftAnimation })}
+            title={
+              settings.driftAnimation
+                ? `Drift Animation: ON (${settings.driftIntensity || 'moderate'}, shifts active word periodically to eliminate fixed-point eye strain)`
+                : 'Drift Animation: OFF (Click to enable anti-fatigue ocular drift)'
+            }
+            aria-label="Toggle Drift Animation"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono transition-all ${
+              settings.driftAnimation
+                ? 'font-bold shadow-xs'
+                : `${theme.borderClass} ${theme.textMuted} opacity-70 hover:opacity-100`
+            }`}
+            style={
+              settings.driftAnimation
+                ? {
+                    borderColor: '#06b6d480',
+                    color: '#22d3ee',
+                    backgroundColor: '#06b6d418',
+                  }
+                : undefined
+            }
+          >
+            <MoveHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Drift</span>
+          </button>
+
           {warmupStatus?.isWarmingUp ? (
             <div 
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-mono"
@@ -529,7 +568,12 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           <div className="w-full max-w-xl flex flex-col items-center pointer-events-none mb-4">
             <div className="w-full flex items-center justify-between px-4">
               <div className={`h-[1px] flex-1 ${theme.borderClass} border-t`} />
-              <div className="flex flex-col items-center mx-4">
+              <div 
+                className="flex flex-col items-center mx-4 transition-transform duration-700 ease-out will-change-transform"
+                style={{
+                  transform: currentDriftOffset !== 0 ? `translateX(${currentDriftOffset}px)` : undefined,
+                }}
+              >
                 <div 
                   className="w-1 h-3.5 rounded-full"
                   style={{ backgroundColor: highlight.hex }}
@@ -571,7 +615,12 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             </button>
           </div>
         ) : (
-          <div className="relative w-full max-w-3xl flex flex-col items-center justify-center">
+          <div 
+            className="relative w-full max-w-3xl flex flex-col items-center justify-center transition-transform duration-700 ease-out will-change-transform"
+            style={{
+              transform: currentDriftOffset !== 0 ? `translateX(${currentDriftOffset}px)` : undefined,
+            }}
+          >
             {/* Optional Contextual Words (Faded previous and next) */}
             {settings.showContextWords && (
               <div className="w-full flex items-center justify-between px-4 text-xs font-mono opacity-25 mb-3 select-none">
@@ -604,7 +653,12 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           <div className="w-full max-w-xl flex flex-col items-center pointer-events-none mt-4">
             <div className="w-full flex items-center justify-between px-4">
               <div className={`h-[1px] flex-1 ${theme.borderClass} border-t`} />
-              <div className="flex flex-col items-center mx-4">
+              <div 
+                className="flex flex-col items-center mx-4 transition-transform duration-700 ease-out will-change-transform"
+                style={{
+                  transform: currentDriftOffset !== 0 ? `translateX(${currentDriftOffset}px)` : undefined,
+                }}
+              >
                 <div 
                   className="w-1 h-3.5 rounded-full"
                   style={{ backgroundColor: highlight.hex }}
@@ -826,6 +880,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             isSmartPaceEnabled={settings.smartPace}
             smartPaceAnalysis={currentWordAnalysis}
             onToggleSmartPace={() => onUpdateSettings({ smartPace: !settings.smartPace })}
+            isDriftEnabled={settings.driftAnimation}
+            driftOffset={currentDriftOffset}
+            onToggleDrift={() => onUpdateSettings({ driftAnimation: !settings.driftAnimation })}
           />
         </div>
       </div>
