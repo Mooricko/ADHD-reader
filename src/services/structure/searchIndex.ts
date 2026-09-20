@@ -26,7 +26,9 @@ export async function searchDocument(
   const isCaseSensitive = options?.caseSensitive ?? false;
 
   const [chunks, structure] = await Promise.all([
-    documentStorageService.getAllChunks(documentId),
+    options?.startWordIndex !== undefined && options?.endWordIndex !== undefined
+      ? documentStorageService.getChunksForWordRange(documentId, options.startWordIndex, options.endWordIndex)
+      : documentStorageService.getAllChunks(documentId),
     documentStorageService.getStructure(documentId),
   ]);
 

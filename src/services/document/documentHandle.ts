@@ -15,6 +15,7 @@ import {
   ResolvedDocumentPosition,
   SearchOptions,
   SearchResult,
+  DocumentLocationIndex,
 } from '../../types';
 import { documentStorageService } from './documentStorageService';
 import { findChunkIndexForWord } from './chunking';
@@ -32,6 +33,7 @@ export class DocumentHandle implements ReaderDocumentHandle {
   public readonly id: string;
   private cachedMetadata: DocumentMetadata | null = null;
   private cachedStructure: DocumentStructure | null = null;
+  private cachedLocationIndex: DocumentLocationIndex | null = null;
   private chunkCache: Map<number, DocumentChunk> = new Map();
   private fullTextCache: string | null = null;
 
@@ -131,15 +133,33 @@ export class DocumentHandle implements ReaderDocumentHandle {
   }
 
   /**
-   * Returns document paragraphs.
+   * Retrieves the document location index, using cache if available.
+   */
+  public async getLocationIndex(): Promise<DocumentLocationIndex | null> {
+    if (this.cachedLocationIndex) {
+      return this.cachedLocationIndex;
+    }
+
+    const idx = await documentStorageService.getLocationIndex(this.id);
+    this.cachedLocationIndex = idx;
+    return idx;
+  }
+
+  /**
+   * Returns document paragraphs without requiring full text reconstruction when structure exists.
    */
   public async getParagraphs(): Promise<string[]> {
+    const structure = await this.getStructure();
+    if (structure?.paragraphs && structure.paragraphs.length > 0) {
+      return structure.paragraphs.map((p) => p.preview || '');
+    }
     const text = await this.getFullText();
     return text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
   }
 
   /**
    * Calculates chunk location, relative offset within chunk, and overall reading progress.
+   * Uses O(log N) binary search over lightweight DocumentLocationIndex without loading full chunks.
    */
   public async getLocationInfo(wordIndex: number): Promise<{
     chunkIndex: number;
@@ -151,12 +171,13 @@ export class DocumentHandle implements ReaderDocumentHandle {
     const totalWords = Math.max(1, meta.totalWords);
     const clampedWordIdx = Math.max(0, Math.min(wordIndex, totalWords - 1));
 
-    const allChunks = await documentStorageService.getAllChunks(this.id);
-    const chunkIdx = findChunkIndexForWord(allChunks, clampedWordIdx);
-    const activeChunk = allChunks[chunkIdx];
+    const locationIndex = await this.getLocationIndex();
+    const chunkRanges = locationIndex?.chunks || locationIndex?.chunkRanges || [];
+    const chunkIdx = findChunkIndexForWord(chunkRanges, clampedWordIdx);
+    const activeRange = chunkRanges[chunkIdx];
 
-    const wordIndexInChunk = activeChunk
-      ? Math.max(0, clampedWordIdx - activeChunk.startWordIndex)
+    const wordIndexInChunk = activeRange
+      ? Math.max(0, clampedWordIdx - activeRange.startWordIndex)
       : 0;
 
     const progressPercent = Math.min(
@@ -217,39 +238,47 @@ export class DocumentHandle implements ReaderDocumentHandle {
     return structure?.pages || null;
   }
 
+  private getResolverContext() {
+    return {
+      meta: this.cachedMetadata,
+      structure: this.cachedStructure,
+      locationIndex: this.cachedLocationIndex,
+    };
+  }
+
   /**
    * Resolves a source-aware position into a canonical reading position.
    */
   public async resolvePosition(position: DocumentPosition): Promise<ResolvedDocumentPosition> {
-    return resolvePosition(this.id, position);
+    return resolvePosition(this.id, position, this.getResolverContext());
   }
 
   /**
    * Resolves a page number into a canonical reading position.
    */
   public async resolvePage(pageNumber: number): Promise<ResolvedDocumentPosition> {
-    return resolvePage(this.id, pageNumber);
+    return resolvePage(this.id, pageNumber, 0, this.getResolverContext());
   }
 
   /**
    * Resolves a chapter ID into a canonical reading position.
    */
   public async resolveChapter(chapterId: string): Promise<ResolvedDocumentPosition> {
-    return resolveChapter(this.id, chapterId);
+    return resolveChapter(this.id, chapterId, 0, this.getResolverContext());
   }
 
   /**
    * Resolves a section ID into a canonical reading position.
    */
   public async resolveSection(sectionId: string): Promise<ResolvedDocumentPosition> {
-    return resolveSection(this.id, sectionId);
+    return resolveSection(this.id, sectionId, 0, this.getResolverContext());
   }
 
   /**
    * Resolves a word index into a canonical reading position.
    */
   public async resolveWordIndex(wordIndex: number): Promise<ResolvedDocumentPosition> {
-    return resolveWordIndex(this.id, wordIndex);
+    return resolveWordIndex(this.id, wordIndex, this.getResolverContext());
   }
 
   /**
@@ -265,6 +294,7 @@ export class DocumentHandle implements ReaderDocumentHandle {
   public invalidateCache(): void {
     this.cachedMetadata = null;
     this.cachedStructure = null;
+    this.cachedLocationIndex = null;
     this.chunkCache.clear();
     this.fullTextCache = null;
   }

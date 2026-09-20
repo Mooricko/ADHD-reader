@@ -376,8 +376,199 @@ This section switches to English to discuss computational algorithms and RSVP pa
     console.log('✓ Unified DocumentPosition dispatcher passed');
   }
 
+  // =========================================================================
+  // TEST SUITE 7: EMPTY PHYSICAL PDF PAGE HANDLING & 1:1 ALIGNMENT
+  // =========================================================================
+  console.log('Test 7: Empty PDF Pages & 1-to-1 Page Mapping Preservation');
+  {
+    // 8 physical pages where pages 2, 4, 7 are blank/cover/separator pages
+    const pageTexts = [
+      'Page one has thirty words describing the book introduction and concepts.', // Page 1: 10 words
+      '', // Page 2: empty blank page
+      'Page three has another ten words detailing the first theorem.', // Page 3: 10 words
+      '   ', // Page 4: whitespace only
+      'Page five has ten words discussing practical applications in daily life.', // Page 5: 10 words
+      'Page six has ten words examining edge cases in detail.', // Page 6: 10 words
+      '', // Page 7: empty
+      'Page eight has ten words concluding the study with recommendations.', // Page 8: 10 words
+    ];
+
+    const emptyDocId = 'pdf-empty-pages-test';
+    const { structure, pages, fullText } = buildPdfStructure(emptyDocId, pageTexts);
+
+    // 1-to-1 physical mapping
+    assert(pages.length === 8, `Expected 8 physical pages preserved, got ${pages.length}`);
+    assert(structure.pages?.length === 8, `Structure pages length must be 8, got ${structure.pages?.length}`);
+
+    // Verify hasText flags
+    assert(pages[0].hasText === true && pages[0].wordCount > 0, 'Page 1 must have text');
+    assert(pages[1].hasText === false && pages[1].wordCount === 0, 'Page 2 must be marked hasText: false');
+    assert(pages[2].hasText === true && pages[2].wordCount > 0, 'Page 3 must have text');
+    assert(pages[3].hasText === false && pages[3].wordCount === 0, 'Page 4 must be marked hasText: false');
+    assert(pages[6].hasText === false && pages[6].wordCount === 0, 'Page 7 must be marked hasText: false');
+    assert(pages[7].hasText === true && pages[7].wordCount > 0, 'Page 8 must have text');
+
+    // Verify word index alignment: Page 3 must start immediately where Page 1 ended
+    assert(
+      pages[2].startWordIndex === pages[0].endWordIndex + 1,
+      `Page 3 startWordIndex (${pages[2].startWordIndex}) must connect to Page 1 endWordIndex (${pages[0].endWordIndex})`
+    );
+
+    // Persist and test resolution
+    await documentStorageService.createAndSaveDocument({
+      id: emptyDocId,
+      title: 'PDF With Empty Physical Pages',
+      text: fullText,
+      sourceType: 'pdf',
+      structure,
+      pages,
+    });
+
+    // Resolve Page 2 (empty page) -> should gracefully map to page 2 entry
+    const resEmptyPage = await resolvePage(emptyDocId, 2);
+    assert(resEmptyPage.pageNumber === 2, `Expected resolved pageNumber 2, got ${resEmptyPage.pageNumber}`);
+
+    // Resolve Page 3
+    const resP3 = await resolvePage(emptyDocId, 3);
+    assert(resP3.pageNumber === 3, `Expected resolved pageNumber 3, got ${resP3.pageNumber}`);
+    assert(resP3.globalWordIndex === pages[2].startWordIndex, 'Page 3 resolved to exact startWordIndex');
+
+    // Resolve Page 8
+    const resP8 = await resolvePage(emptyDocId, 8);
+    assert(resP8.pageNumber === 8, `Expected resolved pageNumber 8, got ${resP8.pageNumber}`);
+
+    console.log('✓ Empty physical PDF page preservation & alignment passed');
+  }
+
+  // =========================================================================
+  // TEST SUITE 8: NESTED PDF OUTLINE HIERARCHY
+  // =========================================================================
+  console.log('Test 8: Nested PDF Outline Hierarchy (Part -> Chapter -> Section)');
+  {
+    const pageTexts = [
+      'Part I opening text and overview of the entire series.', // Page 1
+      'Chapter 1 detailed description of fundamentals and history.', // Page 2
+      'Section 1.1 formal mathematical definitions and lemmas.', // Page 3
+      'Chapter 2 architecture and engineering implementations.', // Page 4
+      'Section 2.1 data flow and caching structures.', // Page 5
+      'Part II advanced topics and future paradigms.', // Page 6
+    ];
+
+    const nestedOutlines: PdfOutlineItem[] = [
+      {
+        title: 'Part I: Core Foundations',
+        pageNumber: 1,
+        level: 1,
+        children: [
+          {
+            title: 'Chapter 1: Theory',
+            pageNumber: 2,
+            level: 2,
+            children: [
+              {
+                title: 'Section 1.1: Formal Proofs',
+                pageNumber: 3,
+                level: 3,
+              },
+            ],
+          },
+          {
+            title: 'Chapter 2: Implementation',
+            pageNumber: 4,
+            level: 2,
+            children: [
+              {
+                title: 'Section 2.1: Data Structures',
+                pageNumber: 5,
+                level: 3,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Part II: Advanced Paradigms',
+        pageNumber: 6,
+        level: 1,
+      },
+    ];
+
+    const nestedDocId = 'pdf-nested-outlines-test';
+    const { structure, pages, fullText } = buildPdfStructure(nestedDocId, pageTexts, nestedOutlines);
+
+    assert(structure.chapters.length === 2, `Expected 2 top-level chapters (Parts), got ${structure.chapters.length}`);
+    const part1 = structure.chapters[0];
+    assert(part1.title === 'Part I: Core Foundations', `Expected Part I title, got ${part1.title}`);
+    assert(part1.children?.length === 2, `Part I must have 2 Chapter children, got ${part1.children?.length}`);
+
+    const chap1 = part1.children![0];
+    assert(chap1.title === 'Chapter 1: Theory', `Expected Chapter 1 title, got ${chap1.title}`);
+    assert(chap1.level === 2, `Chapter 1 level must be 2, got ${chap1.level}`);
+    assert(chap1.parentId === part1.id, `Chapter 1 parentId must link to Part I, got ${chap1.parentId}`);
+    assert(chap1.children?.length === 1, `Chapter 1 must have 1 Section child, got ${chap1.children?.length}`);
+
+    const sec11 = chap1.children![0];
+    assert(sec11.title === 'Section 1.1: Formal Proofs', `Expected Section 1.1 title, got ${sec11.title}`);
+    assert(sec11.level === 3, `Section 1.1 level must be 3, got ${sec11.level}`);
+    assert(sec11.parentId === chap1.id, `Section 1.1 parentId must link to Chapter 1, got ${sec11.parentId}`);
+
+    // All sections flattened in structure.sections
+    assert(structure.sections.length === 6, `Expected 6 total outline nodes flattened, got ${structure.sections.length}`);
+
+    await documentStorageService.createAndSaveDocument({
+      id: nestedDocId,
+      title: 'Nested Outline PDF Document',
+      text: fullText,
+      sourceType: 'pdf',
+      structure,
+      pages,
+    });
+
+    // Resolve Section 1.1
+    const resSec11 = await resolveSection(nestedDocId, sec11.id);
+    assert(resSec11.section?.title === sec11.title, `Resolved section title mismatch: ${resSec11.section?.title}`);
+    assert(resSec11.chapter?.title === part1.title, `Enclosing top chapter must be Part I: ${resSec11.chapter?.title}`);
+    assert(resSec11.pageNumber === 3, `Section 1.1 must resolve to page 3, got ${resSec11.pageNumber}`);
+
+    console.log('✓ Nested PDF outline hierarchy (Part -> Chapter -> Section) verified');
+  }
+
+  // =========================================================================
+  // TEST SUITE 9: O(log N) RESOLUTION BENCHMARK & LOCATION INDEX PERSISTENCE
+  // =========================================================================
+  console.log('Test 9: Location Index Persistence & O(log N) Resolution Benchmark');
+  {
+    const benchDocId = 'pdf-benchmark-1000'; // 1,000 pages, 200,000 words
+    const locationIndex = await documentStorageService.getLocationIndex(benchDocId);
+    assert(locationIndex !== null, 'DocumentLocationIndex must be persisted and retrieved');
+    assert(locationIndex.totalWords >= 199000, `Location index total words must be ~200,000, got ${locationIndex.totalWords}`);
+    assert(locationIndex.chunkRanges.length > 0, 'Location index must contain chunk ranges');
+
+    const handle = new DocumentHandle(benchDocId);
+    
+    // Warm handle caches
+    await handle.getMetadata();
+    await handle.getStructure();
+    await handle.getLocationIndex();
+
+    // Benchmark 200 random location lookups
+    const lookupCount = 200;
+    const startBench = performance.now();
+    for (let i = 0; i < lookupCount; i++) {
+      const targetWord = Math.floor(Math.random() * locationIndex.totalWords);
+      const pos = await handle.resolveWordIndex(targetWord);
+      assert(pos.globalWordIndex === targetWord, `Resolved word index mismatch: ${pos.globalWordIndex} vs ${targetWord}`);
+      assert(pos.chunkIndex >= 0, `Invalid chunkIndex: ${pos.chunkIndex}`);
+    }
+    const elapsed = performance.now() - startBench;
+    const avgMs = elapsed / lookupCount;
+
+    assert(avgMs < 0.5, `Average resolveWordIndex must be < 0.5ms (O(log N)), was ${avgMs.toFixed(3)}ms`);
+    console.log(`✓ 200 O(log N) binary searches completed in ${elapsed.toFixed(2)}ms (${avgMs.toFixed(3)}ms/lookup)`);
+  }
+
   console.log('\n=============================================================');
-  console.log('All Phase 3 Document Structure & Navigation Tests Passed! (6 Suites)');
+  console.log('All Phase 3 Document Structure & Navigation Tests Passed! (9 Suites)');
   console.log('=============================================================');
 }
 

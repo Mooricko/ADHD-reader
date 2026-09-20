@@ -182,6 +182,7 @@ export function buildLocationIndex(
     totalWords,
     totalCharacters,
     chunkRanges,
+    chunks: chunkRanges,
   };
 }
 

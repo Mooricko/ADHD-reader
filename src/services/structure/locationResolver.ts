@@ -15,9 +15,18 @@ import {
   PageIndexEntry,
   ParagraphIndexEntry,
   DocumentChunk,
+  DocumentLocationIndex,
+  DocumentMetadata,
+  LocationChunkRange,
 } from '../../types';
 import { documentStorageService } from '../document/documentStorageService';
 import { findChunkIndexForWord } from '../document/chunking';
+
+export interface ResolverContext {
+  meta?: DocumentMetadata | null;
+  structure?: DocumentStructure | null;
+  locationIndex?: DocumentLocationIndex | null;
+}
 
 /**
  * Binary search to find the page containing a given global word index.
@@ -35,6 +44,16 @@ export function findPageForWordIndex(
     const mid = Math.floor((low + high) / 2);
     const page = pages[mid];
 
+    // If page is empty, route search according to boundary
+    if (page.hasText === false || page.wordCount === 0) {
+      if (wordIndex < page.startWordIndex) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+      continue;
+    }
+
     if (wordIndex < page.startWordIndex) {
       high = mid - 1;
     } else if (wordIndex > page.endWordIndex) {
@@ -44,7 +63,7 @@ export function findPageForWordIndex(
     }
   }
 
-  // If between or at boundary
+  // Fallback if at boundary
   if (high >= 0 && high < pages.length) return pages[high];
   if (low >= 0 && low < pages.length) return pages[low];
   return null;
@@ -111,24 +130,26 @@ export function findParagraphForWord(
 }
 
 /**
- * Helper to build the final canonical ResolvedDocumentPosition
+ * Helper to build the final canonical ResolvedDocumentPosition in O(log N)
+ * using lightweight chunk range indexing without loading full chunk bodies.
  */
 function buildResolvedPosition(params: {
   documentId: string;
   globalWordIndex: number;
   totalWords: number;
-  chunks: DocumentChunk[];
+  chunkRanges?: Array<{ chunkIndex: number; startWordIndex: number; endWordIndex: number }>;
   structure?: DocumentStructure | null;
+  explicitPageNumber?: number;
 }): ResolvedDocumentPosition {
-  const { documentId, totalWords, chunks, structure } = params;
+  const { documentId, totalWords, chunkRanges = [], structure, explicitPageNumber } = params;
   const safeTotalWords = Math.max(1, totalWords);
   const clampedWordIndex = Math.max(0, Math.min(params.globalWordIndex, safeTotalWords - 1));
 
-  // Determine chunk index
-  const chunkIndex = findChunkIndexForWord(chunks, clampedWordIndex);
-  const activeChunk = chunks[chunkIndex];
-  const wordIndexInChunk = activeChunk
-    ? Math.max(0, clampedWordIndex - activeChunk.startWordIndex)
+  // Determine chunk index via binary search
+  const chunkIndex = findChunkIndexForWord(chunkRanges, clampedWordIndex);
+  const activeRange = chunkRanges[chunkIndex];
+  const wordIndexInChunk = activeRange
+    ? Math.max(0, clampedWordIndex - activeRange.startWordIndex)
     : 0;
 
   const progressPercent = Math.min(
@@ -136,14 +157,14 @@ function buildResolvedPosition(params: {
     Math.max(0, Math.round(((clampedWordIndex + 1) / safeTotalWords) * 100))
   );
 
-  let pageNumber: number | undefined;
+  let pageNumber: number | undefined = explicitPageNumber;
   let chapter: StructuralNode | undefined;
   let section: StructuralNode | undefined;
   let paragraphIndex: number | undefined;
 
   if (structure) {
-    // 1. PDF Page resolution (only if document has pages)
-    if (structure.pages && structure.pages.length > 0) {
+    // 1. PDF Page resolution (only if document has pages and pageNumber was not explicitly given)
+    if (pageNumber === undefined && structure.pages && structure.pages.length > 0) {
       const pageEntry = findPageForWordIndex(structure.pages, clampedWordIndex);
       if (pageEntry) {
         pageNumber = pageEntry.pageNumber;
@@ -184,12 +205,13 @@ function buildResolvedPosition(params: {
 export async function resolvePage(
   documentId: string,
   pageNumber: number,
-  wordOffset: number = 0
+  wordOffset: number = 0,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const [meta, structure, chunks] = await Promise.all([
-    documentStorageService.getMetadata(documentId),
-    documentStorageService.getStructure(documentId),
-    documentStorageService.getAllChunks(documentId),
+  const [meta, structure, locationIndex] = await Promise.all([
+    context?.meta ?? documentStorageService.getMetadata(documentId),
+    context?.structure ?? documentStorageService.getStructure(documentId),
+    context?.locationIndex ?? documentStorageService.getLocationIndex(documentId),
   ]);
 
   if (!meta) {
@@ -212,8 +234,9 @@ export async function resolvePage(
     documentId,
     globalWordIndex,
     totalWords: meta.totalWords,
-    chunks,
+    chunkRanges: locationIndex?.chunks || locationIndex?.chunkRanges,
     structure,
+    explicitPageNumber: clampedPageNum,
   });
 }
 
@@ -223,12 +246,13 @@ export async function resolvePage(
 export async function resolveChapter(
   documentId: string,
   chapterId: string,
-  wordOffset: number = 0
+  wordOffset: number = 0,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const [meta, structure, chunks] = await Promise.all([
-    documentStorageService.getMetadata(documentId),
-    documentStorageService.getStructure(documentId),
-    documentStorageService.getAllChunks(documentId),
+  const [meta, structure, locationIndex] = await Promise.all([
+    context?.meta ?? documentStorageService.getMetadata(documentId),
+    context?.structure ?? documentStorageService.getStructure(documentId),
+    context?.locationIndex ?? documentStorageService.getLocationIndex(documentId),
   ]);
 
   if (!meta) {
@@ -253,7 +277,7 @@ export async function resolveChapter(
     documentId,
     globalWordIndex,
     totalWords: meta.totalWords,
-    chunks,
+    chunkRanges: locationIndex?.chunks || locationIndex?.chunkRanges,
     structure,
   });
 }
@@ -264,12 +288,13 @@ export async function resolveChapter(
 export async function resolveSection(
   documentId: string,
   sectionId: string,
-  wordOffset: number = 0
+  wordOffset: number = 0,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const [meta, structure, chunks] = await Promise.all([
-    documentStorageService.getMetadata(documentId),
-    documentStorageService.getStructure(documentId),
-    documentStorageService.getAllChunks(documentId),
+  const [meta, structure, locationIndex] = await Promise.all([
+    context?.meta ?? documentStorageService.getMetadata(documentId),
+    context?.structure ?? documentStorageService.getStructure(documentId),
+    context?.locationIndex ?? documentStorageService.getLocationIndex(documentId),
   ]);
 
   if (!meta) {
@@ -291,7 +316,7 @@ export async function resolveSection(
     documentId,
     globalWordIndex,
     totalWords: meta.totalWords,
-    chunks,
+    chunkRanges: locationIndex?.chunks || locationIndex?.chunkRanges,
     structure,
   });
 }
@@ -301,12 +326,13 @@ export async function resolveSection(
  */
 export async function resolveWordIndex(
   documentId: string,
-  wordIndex: number
+  wordIndex: number,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const [meta, structure, chunks] = await Promise.all([
-    documentStorageService.getMetadata(documentId),
-    documentStorageService.getStructure(documentId),
-    documentStorageService.getAllChunks(documentId),
+  const [meta, structure, locationIndex] = await Promise.all([
+    context?.meta ?? documentStorageService.getMetadata(documentId),
+    context?.structure ?? documentStorageService.getStructure(documentId),
+    context?.locationIndex ?? documentStorageService.getLocationIndex(documentId),
   ]);
 
   if (!meta) {
@@ -317,7 +343,7 @@ export async function resolveWordIndex(
     documentId,
     globalWordIndex: wordIndex,
     totalWords: meta.totalWords,
-    chunks,
+    chunkRanges: locationIndex?.chunks || locationIndex?.chunkRanges,
     structure,
   });
 }
@@ -328,12 +354,13 @@ export async function resolveWordIndex(
 export async function resolveParagraph(
   documentId: string,
   paragraphIndex: number,
-  wordOffset: number = 0
+  wordOffset: number = 0,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const [meta, structure, chunks] = await Promise.all([
-    documentStorageService.getMetadata(documentId),
-    documentStorageService.getStructure(documentId),
-    documentStorageService.getAllChunks(documentId),
+  const [meta, structure, locationIndex] = await Promise.all([
+    context?.meta ?? documentStorageService.getMetadata(documentId),
+    context?.structure ?? documentStorageService.getStructure(documentId),
+    context?.locationIndex ?? documentStorageService.getLocationIndex(documentId),
   ]);
 
   if (!meta) {
@@ -352,7 +379,7 @@ export async function resolveParagraph(
     documentId,
     globalWordIndex,
     totalWords: meta.totalWords,
-    chunks,
+    chunkRanges: locationIndex?.chunks || locationIndex?.chunkRanges,
     structure,
   });
 }
@@ -362,9 +389,10 @@ export async function resolveParagraph(
  */
 export async function resolvePercent(
   documentId: string,
-  percent: number
+  percent: number,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
-  const meta = await documentStorageService.getMetadata(documentId);
+  const meta = context?.meta ?? (await documentStorageService.getMetadata(documentId));
   if (!meta) {
     throw new Error(`Document not found: ${documentId}`);
   }
@@ -372,7 +400,7 @@ export async function resolvePercent(
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const targetWord = Math.round((clampedPercent / 100) * Math.max(0, meta.totalWords - 1));
 
-  return resolveWordIndex(documentId, targetWord);
+  return resolveWordIndex(documentId, targetWord, context);
 }
 
 /**
@@ -380,21 +408,22 @@ export async function resolvePercent(
  */
 export async function resolvePosition(
   documentId: string,
-  position: DocumentPosition
+  position: DocumentPosition,
+  context?: ResolverContext
 ): Promise<ResolvedDocumentPosition> {
   switch (position.kind) {
     case 'word':
-      return resolveWordIndex(documentId, position.wordIndex);
+      return resolveWordIndex(documentId, position.wordIndex, context);
     case 'pdf-page':
-      return resolvePage(documentId, position.pageNumber, position.wordOffset);
+      return resolvePage(documentId, position.pageNumber, position.wordOffset, context);
     case 'chapter':
-      return resolveChapter(documentId, position.chapterId, position.wordOffset);
+      return resolveChapter(documentId, position.chapterId, position.wordOffset, context);
     case 'section':
-      return resolveSection(documentId, position.sectionId, position.wordOffset);
+      return resolveSection(documentId, position.sectionId, position.wordOffset, context);
     case 'paragraph':
-      return resolveParagraph(documentId, position.paragraphIndex, position.wordOffset);
+      return resolveParagraph(documentId, position.paragraphIndex, position.wordOffset, context);
     case 'percent':
-      return resolvePercent(documentId, position.percent);
+      return resolvePercent(documentId, position.percent, context);
     default:
       throw new Error(`Unsupported position kind: ${(position as any)?.kind}`);
   }

@@ -43,6 +43,7 @@ export function countWordsFast(text: string): number {
     const isSpace =
       code <= 32 ||
       code === 160 ||
+      code === 0x1680 ||
       (code >= 0x2000 && code <= 0x200a) ||
       code === 0x2028 ||
       code === 0x2029 ||
@@ -66,6 +67,16 @@ export function countWordsFast(text: string): number {
   }
 
   return count;
+}
+
+/**
+ * Canonical dehyphenation for line breaks:
+ * e.g., "repre-\nsent" -> "represent", "un-\r\n expected" -> "unexpected"
+ * Uses Unicode-aware letter matching \p{L}.
+ */
+export function dehyphenateText(text: string): string {
+  if (!text) return '';
+  return text.replace(/(\p{L}+)-\s*\r?\n\s*(\p{L}+)/gu, '$1$2');
 }
 
 /**

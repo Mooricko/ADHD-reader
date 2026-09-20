@@ -1,11 +1,55 @@
 import { ReaderDocument } from '../../types';
 import { normalizeText, extractSuggestedTitle, detectTextDirection, countWords } from '../../utils/normalizeText';
 import { buildPdfStructure, PdfOutlineItem } from '../structure/structureBuilder';
+import { dehyphenateText } from '../../utils/textParser';
 
 /**
  * Interface for progress callback during multi-page PDF processing
  */
 export type PdfProgressCallback = (progressPercent: number, statusMessage: string) => void;
+
+/**
+ * Recursively extracts outline nodes from PDF.js document outlines, preserving tree hierarchy.
+ */
+async function extractOutlineTree(
+  rawNodes: any[],
+  pdfDoc: any,
+  level = 1
+): Promise<PdfOutlineItem[]> {
+  const results: PdfOutlineItem[] = [];
+  for (const item of rawNodes) {
+    if (!item || typeof item.title !== 'string') continue;
+
+    let pageNumber = 1;
+    if (item.dest) {
+      try {
+        let destRef = item.dest;
+        if (typeof destRef === 'string') {
+          destRef = await pdfDoc.getDestination(destRef);
+        }
+        if (Array.isArray(destRef) && destRef[0]) {
+          const pageIdx = await pdfDoc.getPageIndex(destRef[0]);
+          pageNumber = pageIdx + 1;
+        }
+      } catch {
+        // Destination lookup failure is non-fatal
+      }
+    }
+
+    let children: PdfOutlineItem[] | undefined;
+    if (item.items && Array.isArray(item.items) && item.items.length > 0) {
+      children = await extractOutlineTree(item.items, pdfDoc, level + 1);
+    }
+
+    results.push({
+      title: item.title,
+      pageNumber,
+      level,
+      items: children && children.length > 0 ? children : undefined,
+    });
+  }
+  return results;
+}
 
 /**
  * Basic pure-JS fallback for extracting text from raw PDF ArrayBuffer if PDF.js worker is unavailable.
@@ -81,6 +125,7 @@ export async function extractPdf(
   let fullText = '';
   let pageCount = 0;
   const pageTexts: string[] = [];
+  let outlines: PdfOutlineItem[] = [];
 
   onProgress?.(10, 'Initializing PDF engine...');
 
@@ -137,38 +182,23 @@ export async function extractPdf(
         }
       }
 
-      if (pageStr.trim()) {
-        pageTexts.push(pageStr.trim());
-      }
+      // Dehyphenate broken words across linebreaks on this page
+      const dehyphenatedPage = dehyphenateText(pageStr);
+      // ALWAYS push an entry for every physical page (1-based index alignment)
+      pageTexts.push(dehyphenatedPage.trim());
     }
 
-    // Try extracting bookmarks/outlines
-    let outlines: PdfOutlineItem[] = [];
+    // Extract hierarchical bookmarks/outlines
     try {
       const rawOutline = await pdfDoc.getOutline();
-      if (rawOutline && Array.isArray(rawOutline)) {
-        for (const item of rawOutline) {
-          if (item.title && item.dest) {
-            let destRef = item.dest;
-            if (typeof destRef === 'string') {
-              destRef = await pdfDoc.getDestination(destRef);
-            }
-            if (Array.isArray(destRef) && destRef[0]) {
-              const pageIdx = await pdfDoc.getPageIndex(destRef[0]);
-              outlines.push({
-                title: item.title,
-                pageNumber: pageIdx + 1,
-                level: 1,
-              });
-            }
-          }
-        }
+      if (rawOutline && Array.isArray(rawOutline) && rawOutline.length > 0) {
+        outlines = await extractOutlineTree(rawOutline, pdfDoc, 1);
       }
     } catch {
       // Gracefully continue if outline extraction is unavailable
     }
 
-    fullText = pageTexts.join('\n\n');
+    fullText = pageTexts.filter(Boolean).join('\n\n');
   } catch (pdfJsErr: any) {
     // Check for password protection
     if (pdfJsErr?.name === 'PasswordException' || String(pdfJsErr).includes('password')) {
@@ -191,9 +221,6 @@ export async function extractPdf(
     }
   }
 
-  // Normalize hyphenated words broken across lines (e.g., "repre-\nsent" -> "represent")
-  fullText = fullText.replace(/(\w+)-\n(\w+)/g, '$1$2');
-
   const normalized = normalizeText(fullText);
 
   if (!normalized || normalized.length < 5) {
@@ -208,10 +235,11 @@ export async function extractPdf(
   const direction = detectTextDirection(normalized);
   const docId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  // Build physical page index and structure
+  // Build physical page index and structure preserving outlines and empty physical pages
   const { structure, pages } = buildPdfStructure(
     docId,
-    pageTexts.length > 0 ? pageTexts : [normalized]
+    pageTexts.length > 0 ? pageTexts : [normalized],
+    outlines.length > 0 ? outlines : undefined
   );
 
   return {

@@ -7,19 +7,27 @@
  * where IndexedDB is unavailable, restricted, or in Node.js test environments.
  */
 
-import { DocumentMetadata, DocumentChunk, InputSourceType, DocumentStructure, PageIndexEntry } from '../../types';
-import { chunkDocument, reconstructTextFromChunks } from './chunking';
+import {
+  DocumentMetadata,
+  DocumentChunk,
+  InputSourceType,
+  DocumentStructure,
+  PageIndexEntry,
+  DocumentLocationIndex,
+} from '../../types';
+import { chunkDocument, reconstructTextFromChunks, buildLocationIndex } from './chunking';
 import { countWordsFast } from '../../utils/textParser';
 import { detectTextDirection } from '../../utils/normalizeText';
 import { buildDocumentStructure } from '../structure/structureBuilder';
 
 const DB_NAME = 'adhd_reader_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = {
   METADATA: 'metadata',
   CHUNKS: 'chunks',
   STRUCTURES: 'structures',
+  LOCATION_INDEXES: 'location_indexes',
 } as const;
 
 export interface CreateDocumentInput {
@@ -52,6 +60,7 @@ export class DocumentStorageService {
   private memoryMetadata: Map<string, DocumentMetadata> = new Map();
   private memoryChunks: Map<string, DocumentChunk> = new Map(); // key: `${documentId}:${chunkIndex}`
   private memoryStructures: Map<string, DocumentStructure> = new Map();
+  private memoryLocationIndexes: Map<string, DocumentLocationIndex> = new Map();
 
   constructor() {
     // Determine if IndexedDB is available
@@ -100,6 +109,11 @@ export class DocumentStorageService {
           // 3. Structures Object Store (Primary key: documentId)
           if (!db.objectStoreNames.contains(STORES.STRUCTURES)) {
             db.createObjectStore(STORES.STRUCTURES, { keyPath: 'documentId' });
+          }
+
+          // 4. Location Indexes Object Store (Primary key: documentId)
+          if (!db.objectStoreNames.contains(STORES.LOCATION_INDEXES)) {
+            db.createObjectStore(STORES.LOCATION_INDEXES, { keyPath: 'documentId' });
           }
         };
 
@@ -259,12 +273,81 @@ export class DocumentStorageService {
   }
 
   /**
-   * Convenience method to save metadata, chunks, and structure together.
+   * Saves lightweight document location index record.
+   */
+  public async saveLocationIndex(locationIndex: DocumentLocationIndex): Promise<void> {
+    await this.initialize();
+    this.memoryLocationIndexes.set(locationIndex.documentId, { ...locationIndex });
+
+    if (this.isFallbackMode || !this.db) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = this.db!.transaction(STORES.LOCATION_INDEXES, 'readwrite');
+        const store = tx.objectStore(STORES.LOCATION_INDEXES);
+        const req = store.put(locationIndex);
+
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        tx.onerror = () => reject(tx.error);
+      } catch (err) {
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * Retrieves document location index by documentId.
+   * If not found, attempts to reconstruct it once and cache it.
+   */
+  public async getLocationIndex(documentId: string): Promise<DocumentLocationIndex | null> {
+    await this.initialize();
+
+    if (this.memoryLocationIndexes.has(documentId)) {
+      return this.memoryLocationIndexes.get(documentId)!;
+    }
+
+    if (!this.isFallbackMode && this.db) {
+      const idxFromDb = await new Promise<DocumentLocationIndex | null>((resolve) => {
+        try {
+          const tx = this.db!.transaction(STORES.LOCATION_INDEXES, 'readonly');
+          const store = tx.objectStore(STORES.LOCATION_INDEXES);
+          const req = store.get(documentId);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+
+      if (idxFromDb) {
+        this.memoryLocationIndexes.set(documentId, idxFromDb);
+        return idxFromDb;
+      }
+    }
+
+    // Fallback: If not found in index store, reconstruct once from chunk ranges and persist
+    const chunks = await this.getAllChunks(documentId);
+    if (!chunks || chunks.length === 0) {
+      return null;
+    }
+    const meta = await this.getMetadata(documentId);
+    const totalChars = meta?.totalCharacters ?? 0;
+    const reconstructed = buildLocationIndex(documentId, chunks, totalChars);
+    await this.saveLocationIndex(reconstructed);
+    return reconstructed;
+  }
+
+  /**
+   * Convenience method to save metadata, chunks, structure, and locationIndex together.
    */
   public async saveDocument(
     meta: DocumentMetadata,
     chunks: DocumentChunk[],
-    structure?: DocumentStructure
+    structure?: DocumentStructure,
+    locationIndex?: DocumentLocationIndex
   ): Promise<void> {
     const updatedMeta: DocumentMetadata = {
       ...meta,
@@ -273,9 +356,14 @@ export class DocumentStorageService {
       pageCount: structure?.pages?.length ?? meta.pageCount,
       updatedAt: Date.now(),
     };
+
+    const locIndex =
+      locationIndex || buildLocationIndex(meta.id, chunks, meta.totalCharacters);
+
     const promises: Promise<void>[] = [
       this.saveDocumentMetadata(updatedMeta),
       this.saveChunks(chunks),
+      this.saveLocationIndex(locIndex),
     ];
     if (structure) {
       promises.push(this.saveStructure(structure));
@@ -284,12 +372,13 @@ export class DocumentStorageService {
   }
 
   /**
-   * Creates a full scalable document: generates metadata, chunks, structure, and persists to IndexedDB.
+   * Creates a full scalable document: generates metadata, chunks, structure, location index, and persists to IndexedDB.
    */
   public async createAndSaveDocument(input: CreateDocumentInput): Promise<{
     metadata: DocumentMetadata;
     chunks: DocumentChunk[];
     structure: DocumentStructure;
+    locationIndex: DocumentLocationIndex;
   }> {
     const docId = input.id || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const text = input.text ?? '';
@@ -332,8 +421,10 @@ export class DocumentStorageService {
       hasStructure: true,
     };
 
-    await this.saveDocument(metadata, chunks, structure);
-    return { metadata, chunks, structure };
+    const locationIndex = buildLocationIndex(docId, chunks, totalChars);
+
+    await this.saveDocument(metadata, chunks, structure, locationIndex);
+    return { metadata, chunks, structure, locationIndex };
   }
 
   /**
@@ -482,6 +573,7 @@ export class DocumentStorageService {
     if (this.isFallbackMode || !this.db) {
       this.memoryMetadata.delete(id);
       this.memoryStructures.delete(id);
+      this.memoryLocationIndexes.delete(id);
       for (const [key, chunk] of this.memoryChunks.entries()) {
         if (chunk.documentId === id) {
           this.memoryChunks.delete(key);
@@ -493,15 +585,17 @@ export class DocumentStorageService {
     return new Promise((resolve, reject) => {
       try {
         const tx = this.db!.transaction(
-          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES],
+          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES, STORES.LOCATION_INDEXES],
           'readwrite'
         );
         const metaStore = tx.objectStore(STORES.METADATA);
         const chunksStore = tx.objectStore(STORES.CHUNKS);
         const structuresStore = tx.objectStore(STORES.STRUCTURES);
+        const locationIndexesStore = tx.objectStore(STORES.LOCATION_INDEXES);
 
         metaStore.delete(id);
         structuresStore.delete(id);
+        locationIndexesStore.delete(id);
 
         // Delete all chunks for this document
         const index = chunksStore.index('documentId');
@@ -515,11 +609,17 @@ export class DocumentStorageService {
           }
         };
 
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => {
+          this.memoryMetadata.delete(id);
+          this.memoryStructures.delete(id);
+          this.memoryLocationIndexes.delete(id);
+          resolve();
+        };
         tx.onerror = () => reject(tx.error);
       } catch (err) {
         this.memoryMetadata.delete(id);
         this.memoryStructures.delete(id);
+        this.memoryLocationIndexes.delete(id);
         resolve();
       }
     });
@@ -579,13 +679,14 @@ export class DocumentStorageService {
   }
 
   /**
-   * Clears all metadata, chunks, and structures.
+   * Clears all metadata, chunks, structures, and location indexes.
    */
   public async clearAll(): Promise<void> {
     await this.initialize();
     this.memoryMetadata.clear();
     this.memoryChunks.clear();
     this.memoryStructures.clear();
+    this.memoryLocationIndexes.clear();
 
     if (this.isFallbackMode || !this.db) {
       return;
@@ -594,12 +695,13 @@ export class DocumentStorageService {
     return new Promise((resolve, reject) => {
       try {
         const tx = this.db!.transaction(
-          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES],
+          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES, STORES.LOCATION_INDEXES],
           'readwrite'
         );
         tx.objectStore(STORES.METADATA).clear();
         tx.objectStore(STORES.CHUNKS).clear();
         tx.objectStore(STORES.STRUCTURES).clear();
+        tx.objectStore(STORES.LOCATION_INDEXES).clear();
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       } catch {

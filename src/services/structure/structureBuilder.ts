@@ -24,11 +24,37 @@ export interface PdfOutlineItem {
   title: string;
   pageNumber: number; // 1-based page number
   level?: number;
+  items?: PdfOutlineItem[];
+  children?: PdfOutlineItem[];
+}
+
+/**
+ * Recursively flattens an outline hierarchy while preserving tree depth levels.
+ */
+function flattenPdfOutlines(
+  items: PdfOutlineItem[],
+  currentLevel = 1
+): Array<{ title: string; pageNumber: number; level: number }> {
+  const result: Array<{ title: string; pageNumber: number; level: number }> = [];
+  for (const item of items) {
+    const lvl = item.level ?? currentLevel;
+    result.push({
+      title: item.title,
+      pageNumber: item.pageNumber,
+      level: lvl,
+    });
+    const subItems = item.items || item.children;
+    if (subItems && Array.isArray(subItems) && subItems.length > 0) {
+      result.push(...flattenPdfOutlines(subItems, lvl + 1));
+    }
+  }
+  return result;
 }
 
 /**
  * Builds a PDF DocumentStructure from per-page text extractions.
- * Crucial rule: Record exact start and end word indices for every single page.
+ * Crucial rule: Record exact start and end word indices for every single page,
+ * ensuring empty or image-only pages are retained as valid navigation targets.
  */
 export function buildPdfStructure(
   documentId: string,
@@ -51,8 +77,9 @@ export function buildPdfStructure(
     normalizedPageTexts.push(normPageText);
 
     const pageWordCount = countWordsFast(normPageText);
+    const hasText = pageWordCount > 0;
     const startWordIndex = cumulativeWordIndex;
-    const endWordIndex = pageWordCount > 0 ? startWordIndex + pageWordCount - 1 : startWordIndex;
+    const endWordIndex = hasText ? startWordIndex + pageWordCount - 1 : Math.max(0, startWordIndex - 1);
 
     const startCharIndex = cumulativeCharIndex;
     const endCharIndex = startCharIndex + normPageText.length;
@@ -65,18 +92,20 @@ export function buildPdfStructure(
       startWordIndex,
       endWordIndex,
       wordCount: pageWordCount,
+      hasText,
       startCharIndex,
       endCharIndex,
       textPreview: preview || undefined,
     });
 
-    cumulativeWordIndex += pageWordCount;
+    if (hasText) {
+      cumulativeWordIndex += pageWordCount;
+    }
     // Account for double newline join between pages in full text
     cumulativeCharIndex = endCharIndex + 2;
   }
 
   const fullText = normalizedPageTexts.join('\n\n');
-  const totalWords = cumulativeWordIndex;
 
   // Build chapters & sections from outlines or heading detection
   const { chapters, sections } = buildPdfChapters(documentId, pages, outlines, normalizedPageTexts);
@@ -109,39 +138,61 @@ function buildPdfChapters(
   const sections: StructuralNode[] = [];
 
   if (outlines && outlines.length > 0) {
-    // Map outline items to page word boundaries
-    for (let i = 0; i < outlines.length; i++) {
-      const item = outlines[i];
+    const flatList = flattenPdfOutlines(outlines);
+    const nodeStack: StructuralNode[] = [];
+
+    // Map outline items to page word boundaries and build parent/child hierarchy
+    for (let i = 0; i < flatList.length; i++) {
+      const item = flatList[i];
       const pageNum = Math.max(1, Math.min(item.pageNumber, pages.length));
       const pageEntry = pages[pageNum - 1];
 
       const startWordIndex = pageEntry ? pageEntry.startWordIndex : 0;
       
-      // End word index is either next outline item's start - 1, or end of document
+      // End word index is either next outline item of equal or higher hierarchy (level <= current),
+      // or end of document
       let endWordIndex = pages[pages.length - 1]?.endWordIndex ?? startWordIndex;
-      if (i + 1 < outlines.length) {
-        const nextItem = outlines[i + 1];
-        const nextPageNum = Math.max(1, Math.min(nextItem.pageNumber, pages.length));
-        const nextPageEntry = pages[nextPageNum - 1];
-        if (nextPageEntry) {
-          endWordIndex = Math.max(startWordIndex, nextPageEntry.startWordIndex - 1);
+      let pageEnd = pages.length;
+
+      for (let next = i + 1; next < flatList.length; next++) {
+        if (flatList[next].level <= item.level) {
+          const nextPageNum = Math.max(1, Math.min(flatList[next].pageNumber, pages.length));
+          const nextPageEntry = pages[nextPageNum - 1];
+          if (nextPageEntry) {
+            endWordIndex = Math.max(startWordIndex, nextPageEntry.startWordIndex - 1);
+            pageEnd = nextPageNum;
+          }
+          break;
         }
       }
 
       const node: StructuralNode = {
         id: `chap-${i + 1}`,
         title: item.title.trim() || `Chapter ${i + 1}`,
-        level: item.level || 1,
+        level: item.level,
         startWordIndex,
         endWordIndex,
         pageStart: pageNum,
-        pageEnd: i + 1 < outlines.length ? Math.max(pageNum, outlines[i + 1].pageNumber) : pages.length,
+        pageEnd,
+        children: [],
       };
 
-      sections.push(node);
-      if (node.level === 1) {
+      // Stack-based parent-child link
+      while (nodeStack.length > 0 && nodeStack[nodeStack.length - 1].level >= item.level) {
+        nodeStack.pop();
+      }
+
+      if (nodeStack.length > 0) {
+        const parent = nodeStack[nodeStack.length - 1];
+        node.parentId = parent.id;
+        if (!parent.children) parent.children = [];
+        parent.children.push(node);
+      } else {
         chapters.push(node);
       }
+
+      nodeStack.push(node);
+      sections.push(node);
     }
   } else if (pageTexts && pageTexts.length > 0) {
     // Fallback: detect chapter-like headers in page text
@@ -259,21 +310,27 @@ export function buildMarkdownStructure(
   const totalWords = countWordsFast(normalizedText);
 
   if (headings.length > 0) {
-    // Map each heading to its exact word index in the normalized prose
-    // We do this by tracking prose chunks between headings
-    let currentProseWords = 0;
-    let headingCursor = 0;
-
-    // We can also build the normalized text up to each heading's line to obtain the exact word count
+    // Map each heading to its exact word index using single-pass segment traversal
+    // Avoids repeatedly converting entire prefixes slice(0, h) to readable text
     const headingWordIndices: number[] = [];
+    let prevLineIndex = 0;
+    let runningWordCount = 0;
 
     for (let h = 0; h < headings.length; h++) {
       const heading = headings[h];
-      // Slice raw markdown up to the heading line and convert to readable text to get precise word count
-      const markdownBefore = lines.slice(0, heading.lineIndex).join('\n');
-      const proseBefore = markdownToReadableText(markdownBefore);
-      const wordIdx = countWordsFast(proseBefore);
-      headingWordIndices.push(wordIdx);
+      if (heading.lineIndex > prevLineIndex) {
+        const segment = lines.slice(prevLineIndex, heading.lineIndex).join('\n');
+        const segmentProse = markdownToReadableText(segment);
+        runningWordCount += countWordsFast(segmentProse);
+      }
+      headingWordIndices.push(runningWordCount);
+
+      // Account for the heading line itself in the running word count
+      const headingLine = lines[heading.lineIndex];
+      const headingProse = markdownToReadableText(headingLine);
+      runningWordCount += countWordsFast(headingProse);
+
+      prevLineIndex = heading.lineIndex + 1;
     }
 
     const nodeStack: StructuralNode[] = [];
@@ -521,19 +578,41 @@ export function buildDocumentStructure(
 
 /**
  * Builds paragraph index for fine-grained paragraph navigation.
+ * Uses a single-pass regex scanner to avoid allocating large arrays of full paragraph strings.
  */
 export function buildParagraphIndex(text: string): ParagraphIndexEntry[] {
   if (!text) return [];
 
-  const rawParagraphs = text.split(/\n\s*\n/);
   const entries: ParagraphIndexEntry[] = [];
   let cumulativeWords = 0;
 
-  for (let i = 0; i < rawParagraphs.length; i++) {
-    const p = rawParagraphs[i].trim();
-    if (!p) continue;
+  const paraRegex = /\n\s*\n/g;
+  let startIdx = 0;
+  let match: RegExpExecArray | null;
 
-    const words = countWordsFast(p);
+  while ((match = paraRegex.exec(text)) !== null) {
+    const rawP = text.slice(startIdx, match.index).trim();
+    if (rawP.length > 0) {
+      const words = countWordsFast(rawP);
+      const startWordIndex = cumulativeWords;
+      const endWordIndex = words > 0 ? startWordIndex + words - 1 : startWordIndex;
+
+      entries.push({
+        paragraphIndex: entries.length,
+        startWordIndex,
+        endWordIndex,
+        wordCount: words,
+        preview: rawP.slice(0, 100).replace(/\s+/g, ' ').trim(),
+      });
+
+      cumulativeWords += words;
+    }
+    startIdx = paraRegex.lastIndex;
+  }
+
+  const tailP = text.slice(startIdx).trim();
+  if (tailP.length > 0) {
+    const words = countWordsFast(tailP);
     const startWordIndex = cumulativeWords;
     const endWordIndex = words > 0 ? startWordIndex + words - 1 : startWordIndex;
 
@@ -542,10 +621,8 @@ export function buildParagraphIndex(text: string): ParagraphIndexEntry[] {
       startWordIndex,
       endWordIndex,
       wordCount: words,
-      preview: p.slice(0, 100).replace(/\s+/g, ' ').trim(),
+      preview: tailP.slice(0, 100).replace(/\s+/g, ' ').trim(),
     });
-
-    cumulativeWords += words;
   }
 
   return entries;

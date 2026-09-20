@@ -203,6 +203,13 @@ export interface DocumentChunk {
   endCharIndex?: number;
 }
 
+export interface LocationChunkRange {
+  chunkIndex: number;
+  startWordIndex: number;
+  endWordIndex: number;
+  wordCount: number;
+}
+
 /**
  * Phase 2 Scalable Document Model:
  * DocumentLocationIndex maps word indices to chunks for fast O(1) or O(log N) lookup.
@@ -212,12 +219,8 @@ export interface DocumentLocationIndex {
   totalChunks: number;
   totalWords: number;
   totalCharacters: number;
-  chunkRanges: Array<{
-    chunkIndex: number;
-    startWordIndex: number;
-    endWordIndex: number;
-    wordCount: number;
-  }>;
+  chunkRanges: LocationChunkRange[];
+  chunks?: LocationChunkRange[];
 }
 
 /**
@@ -332,6 +335,7 @@ export interface PageIndexEntry {
   startWordIndex: number;
   endWordIndex: number;
   wordCount: number;
+  hasText?: boolean;
   startCharIndex?: number;
   endCharIndex?: number;
   textPreview?: string;
