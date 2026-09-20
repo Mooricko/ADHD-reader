@@ -1,5 +1,6 @@
 import { ReaderDocument } from '../../types';
 import { normalizeText, extractSuggestedTitle, detectTextDirection, countWords } from '../../utils/normalizeText';
+import { buildPdfStructure, PdfOutlineItem } from '../structure/structureBuilder';
 
 /**
  * Interface for progress callback during multi-page PDF processing
@@ -141,6 +142,32 @@ export async function extractPdf(
       }
     }
 
+    // Try extracting bookmarks/outlines
+    let outlines: PdfOutlineItem[] = [];
+    try {
+      const rawOutline = await pdfDoc.getOutline();
+      if (rawOutline && Array.isArray(rawOutline)) {
+        for (const item of rawOutline) {
+          if (item.title && item.dest) {
+            let destRef = item.dest;
+            if (typeof destRef === 'string') {
+              destRef = await pdfDoc.getDestination(destRef);
+            }
+            if (Array.isArray(destRef) && destRef[0]) {
+              const pageIdx = await pdfDoc.getPageIndex(destRef[0]);
+              outlines.push({
+                title: item.title,
+                pageNumber: pageIdx + 1,
+                level: 1,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Gracefully continue if outline extraction is unavailable
+    }
+
     fullText = pageTexts.join('\n\n');
   } catch (pdfJsErr: any) {
     // Check for password protection
@@ -155,6 +182,7 @@ export async function extractPdf(
     if (fallbackText && fallbackText.trim().length > 20) {
       fullText = fallbackText;
       pageCount = 1;
+      pageTexts.push(fallbackText);
     } else {
       if (pdfJsErr?.message && !pdfJsErr.message.includes('worker')) {
         throw new Error(pdfJsErr.message);
@@ -172,22 +200,31 @@ export async function extractPdf(
     throw new Error("Couldn't extract readable text from this PDF. It may be an image-only scan or empty.");
   }
 
-  onProgress?.(95, 'Finalizing document...');
+  onProgress?.(95, 'Finalizing document structure...');
 
   const cleanName = fileName ? fileName.replace(/\.[^/.]+$/, '') : undefined;
   const title = cleanName || extractSuggestedTitle(normalized, 'PDF Document');
   const wordCount = countWords(normalized);
   const direction = detectTextDirection(normalized);
+  const docId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  // Build physical page index and structure
+  const { structure, pages } = buildPdfStructure(
+    docId,
+    pageTexts.length > 0 ? pageTexts : [normalized]
+  );
 
   return {
-    id: `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: docId,
     sourceType: 'pdf',
     title,
     fileName: fileName || (input instanceof File ? input.name : undefined),
     content: normalized,
     direction,
+    pages,
+    structure,
     metadata: {
-      pageCount,
+      pageCount: pages.length || pageCount,
       wordCount,
     },
   };

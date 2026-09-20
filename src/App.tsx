@@ -509,7 +509,10 @@ export default function App() {
       text: string,
       title?: string,
       existingId?: string,
-      options?: Partial<SavedDocument>
+      options?: Partial<SavedDocument> & {
+        structure?: any;
+        pages?: any[];
+      }
     ) => {
       const validText = text && text.trim() ? text : SAMPLE_TEXTS[0].text;
       const validTitle = title || 'Custom Reading';
@@ -524,8 +527,8 @@ export default function App() {
       setSessionWordsRead(0);
 
       try {
-        // 1. Asynchronously persist metadata + chunks to IndexedDB
-        const { metadata } = await documentStorageService.createAndSaveDocument({
+        // 1. Asynchronously persist metadata + chunks + structure to IndexedDB
+        const { metadata, structure } = await documentStorageService.createAndSaveDocument({
           id: docId,
           title: validTitle,
           text: validText,
@@ -535,6 +538,8 @@ export default function App() {
           direction: options?.direction,
           category: options?.category,
           lastReadWordIndex: 0,
+          structure: options?.structure,
+          pages: options?.pages,
         });
 
         // 2. Persist ONLY lightweight pointers to localStorage (never store giant raw text)
@@ -560,6 +565,8 @@ export default function App() {
             fileName: options?.fileName,
             direction: metadata.direction,
             totalCharacters: metadata.totalCharacters,
+            pageCount: structure.pages?.length,
+            hasStructure: Boolean(structure),
           };
 
           let updated: SavedDocument[];
@@ -588,6 +595,8 @@ export default function App() {
         sourceUrl: doc.sourceUrl,
         fileName: doc.fileName,
         direction: doc.direction,
+        structure: doc.structure,
+        pages: doc.pages,
       });
     },
     [handleApplyText]

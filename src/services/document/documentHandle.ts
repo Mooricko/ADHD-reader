@@ -5,14 +5,33 @@
  * without knowing how the document is physically stored (IndexedDB, memory, etc.).
  */
 
-import { DocumentMetadata, DocumentChunk, ReaderDocumentHandle } from '../../types';
+import {
+  DocumentMetadata,
+  DocumentChunk,
+  ReaderDocumentHandle,
+  DocumentStructure,
+  PageIndexEntry,
+  DocumentPosition,
+  ResolvedDocumentPosition,
+  SearchOptions,
+  SearchResult,
+} from '../../types';
 import { documentStorageService } from './documentStorageService';
 import { findChunkIndexForWord } from './chunking';
 import { countWordsFast } from '../../utils/textParser';
+import {
+  resolvePosition,
+  resolvePage,
+  resolveChapter,
+  resolveSection,
+  resolveWordIndex,
+} from '../structure/locationResolver';
+import { searchDocument } from '../structure/searchIndex';
 
 export class DocumentHandle implements ReaderDocumentHandle {
   public readonly id: string;
   private cachedMetadata: DocumentMetadata | null = null;
+  private cachedStructure: DocumentStructure | null = null;
   private chunkCache: Map<number, DocumentChunk> = new Map();
   private fullTextCache: string | null = null;
 
@@ -178,10 +197,74 @@ export class DocumentHandle implements ReaderDocumentHandle {
   }
 
   /**
+   * Retrieves the document structure, using cache if available.
+   */
+  public async getStructure(): Promise<DocumentStructure | null> {
+    if (this.cachedStructure) {
+      return this.cachedStructure;
+    }
+
+    const structure = await documentStorageService.getStructure(this.id);
+    this.cachedStructure = structure;
+    return structure;
+  }
+
+  /**
+   * Retrieves the PDF page index entries (if paginated).
+   */
+  public async getPages(): Promise<PageIndexEntry[] | null> {
+    const structure = await this.getStructure();
+    return structure?.pages || null;
+  }
+
+  /**
+   * Resolves a source-aware position into a canonical reading position.
+   */
+  public async resolvePosition(position: DocumentPosition): Promise<ResolvedDocumentPosition> {
+    return resolvePosition(this.id, position);
+  }
+
+  /**
+   * Resolves a page number into a canonical reading position.
+   */
+  public async resolvePage(pageNumber: number): Promise<ResolvedDocumentPosition> {
+    return resolvePage(this.id, pageNumber);
+  }
+
+  /**
+   * Resolves a chapter ID into a canonical reading position.
+   */
+  public async resolveChapter(chapterId: string): Promise<ResolvedDocumentPosition> {
+    return resolveChapter(this.id, chapterId);
+  }
+
+  /**
+   * Resolves a section ID into a canonical reading position.
+   */
+  public async resolveSection(sectionId: string): Promise<ResolvedDocumentPosition> {
+    return resolveSection(this.id, sectionId);
+  }
+
+  /**
+   * Resolves a word index into a canonical reading position.
+   */
+  public async resolveWordIndex(wordIndex: number): Promise<ResolvedDocumentPosition> {
+    return resolveWordIndex(this.id, wordIndex);
+  }
+
+  /**
+   * Searches the document for a query term.
+   */
+  public async search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+    return searchDocument(this.id, query, options);
+  }
+
+  /**
    * Invalidates internal caches if document changed externally.
    */
   public invalidateCache(): void {
     this.cachedMetadata = null;
+    this.cachedStructure = null;
     this.chunkCache.clear();
     this.fullTextCache = null;
   }

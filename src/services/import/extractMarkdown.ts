@@ -1,5 +1,6 @@
 import { ReaderDocument } from '../../types';
 import { normalizeText, extractSuggestedTitle, detectTextDirection, countWords } from '../../utils/normalizeText';
+import { buildMarkdownStructure } from '../structure/structureBuilder';
 
 /**
  * Converts raw Markdown content into clean, distraction-free readable prose.
@@ -117,13 +118,17 @@ export async function extractMarkdown(
   const wordCount = countWords(prose);
   const direction = detectTextDirection(prose);
 
+  const docId = `md_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const { structure } = buildMarkdownStructure(docId, rawText);
+
   return {
-    id: `md_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: docId,
     sourceType: 'markdown',
     title,
     fileName: fileName || (input instanceof File ? input.name : undefined),
     content: prose,
     direction,
+    structure,
     metadata: {
       wordCount,
     },

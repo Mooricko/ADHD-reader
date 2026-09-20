@@ -7,17 +7,19 @@
  * where IndexedDB is unavailable, restricted, or in Node.js test environments.
  */
 
-import { DocumentMetadata, DocumentChunk, InputSourceType } from '../../types';
+import { DocumentMetadata, DocumentChunk, InputSourceType, DocumentStructure, PageIndexEntry } from '../../types';
 import { chunkDocument, reconstructTextFromChunks } from './chunking';
 import { countWordsFast } from '../../utils/textParser';
 import { detectTextDirection } from '../../utils/normalizeText';
+import { buildDocumentStructure } from '../structure/structureBuilder';
 
 const DB_NAME = 'adhd_reader_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   METADATA: 'metadata',
   CHUNKS: 'chunks',
+  STRUCTURES: 'structures',
 } as const;
 
 export interface CreateDocumentInput {
@@ -31,6 +33,14 @@ export interface CreateDocumentInput {
   category?: string;
   lastReadWordIndex?: number;
   targetChunkWords?: number;
+  structure?: DocumentStructure;
+  pages?: PageIndexEntry[];
+  options?: {
+    pageTexts?: string[];
+    outlines?: any[];
+    headings?: string[];
+    markdown?: string;
+  };
 }
 
 export class DocumentStorageService {
@@ -41,6 +51,7 @@ export class DocumentStorageService {
   // In-memory fallback stores
   private memoryMetadata: Map<string, DocumentMetadata> = new Map();
   private memoryChunks: Map<string, DocumentChunk> = new Map(); // key: `${documentId}:${chunkIndex}`
+  private memoryStructures: Map<string, DocumentStructure> = new Map();
 
   constructor() {
     // Determine if IndexedDB is available
@@ -84,6 +95,11 @@ export class DocumentStorageService {
             });
             chunksStore.createIndex('documentId', 'documentId', { unique: false });
             chunksStore.createIndex('startWordIndex', 'startWordIndex', { unique: false });
+          }
+
+          // 3. Structures Object Store (Primary key: documentId)
+          if (!db.objectStoreNames.contains(STORES.STRUCTURES)) {
+            db.createObjectStore(STORES.STRUCTURES, { keyPath: 'documentId' });
           }
         };
 
@@ -192,26 +208,88 @@ export class DocumentStorageService {
   }
 
   /**
-   * Convenience method to save both metadata and chunks together.
+   * Saves document structure record.
    */
-  public async saveDocument(meta: DocumentMetadata, chunks: DocumentChunk[]): Promise<void> {
-    const updatedMeta: DocumentMetadata = {
-      ...meta,
-      totalChunks: chunks.length,
-      updatedAt: Date.now(),
-    };
-    await Promise.all([
-      this.saveDocumentMetadata(updatedMeta),
-      this.saveChunks(chunks),
-    ]);
+  public async saveStructure(structure: DocumentStructure): Promise<void> {
+    await this.initialize();
+
+    if (this.isFallbackMode || !this.db) {
+      this.memoryStructures.set(structure.documentId, { ...structure });
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = this.db!.transaction(STORES.STRUCTURES, 'readwrite');
+        const store = tx.objectStore(STORES.STRUCTURES);
+        const req = store.put(structure);
+
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        tx.onerror = () => reject(tx.error);
+      } catch (err) {
+        this.memoryStructures.set(structure.documentId, { ...structure });
+        resolve();
+      }
+    });
   }
 
   /**
-   * Creates a full scalable document: generates metadata, chunks, and persists to IndexedDB.
+   * Retrieves document structure by documentId.
+   */
+  public async getStructure(documentId: string): Promise<DocumentStructure | null> {
+    await this.initialize();
+
+    if (this.isFallbackMode || !this.db) {
+      return this.memoryStructures.get(documentId) || null;
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = this.db!.transaction(STORES.STRUCTURES, 'readonly');
+        const store = tx.objectStore(STORES.STRUCTURES);
+        const req = store.get(documentId);
+
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      } catch (err) {
+        resolve(this.memoryStructures.get(documentId) || null);
+      }
+    });
+  }
+
+  /**
+   * Convenience method to save metadata, chunks, and structure together.
+   */
+  public async saveDocument(
+    meta: DocumentMetadata,
+    chunks: DocumentChunk[],
+    structure?: DocumentStructure
+  ): Promise<void> {
+    const updatedMeta: DocumentMetadata = {
+      ...meta,
+      totalChunks: chunks.length,
+      hasStructure: Boolean(structure),
+      pageCount: structure?.pages?.length ?? meta.pageCount,
+      updatedAt: Date.now(),
+    };
+    const promises: Promise<void>[] = [
+      this.saveDocumentMetadata(updatedMeta),
+      this.saveChunks(chunks),
+    ];
+    if (structure) {
+      promises.push(this.saveStructure(structure));
+    }
+    await Promise.all(promises);
+  }
+
+  /**
+   * Creates a full scalable document: generates metadata, chunks, structure, and persists to IndexedDB.
    */
   public async createAndSaveDocument(input: CreateDocumentInput): Promise<{
     metadata: DocumentMetadata;
     chunks: DocumentChunk[];
+    structure: DocumentStructure;
   }> {
     const docId = input.id || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const text = input.text ?? '';
@@ -219,6 +297,22 @@ export class DocumentStorageService {
     const totalWords = countWordsFast(text);
     const totalChars = text.length;
     const direction = input.direction || detectTextDirection(text);
+
+    // Build or use provided structure
+    let structure = input.structure;
+    if (!structure) {
+      structure = buildDocumentStructure(docId, input.sourceType || 'text', text, {
+        pageTexts: input.options?.pageTexts,
+        outlines: input.options?.outlines,
+        headings: input.options?.headings,
+        markdown: input.options?.markdown,
+      });
+      if (input.pages && input.pages.length > 0) {
+        structure.pages = input.pages;
+      }
+    }
+
+    const pageCount = structure.pages?.length ?? (input.pages?.length || undefined);
 
     const metadata: DocumentMetadata = {
       id: docId,
@@ -234,10 +328,12 @@ export class DocumentStorageService {
       lastReadWordIndex: input.lastReadWordIndex ?? 0,
       category: input.category,
       totalChunks: chunks.length,
+      pageCount,
+      hasStructure: true,
     };
 
-    await this.saveDocument(metadata, chunks);
-    return { metadata, chunks };
+    await this.saveDocument(metadata, chunks, structure);
+    return { metadata, chunks, structure };
   }
 
   /**
@@ -378,13 +474,14 @@ export class DocumentStorageService {
   }
 
   /**
-   * Deletes a document, its metadata, and all its chunks from IndexedDB.
+   * Deletes a document, its metadata, chunks, and structure from IndexedDB.
    */
   public async deleteDocument(id: string): Promise<void> {
     await this.initialize();
 
     if (this.isFallbackMode || !this.db) {
       this.memoryMetadata.delete(id);
+      this.memoryStructures.delete(id);
       for (const [key, chunk] of this.memoryChunks.entries()) {
         if (chunk.documentId === id) {
           this.memoryChunks.delete(key);
@@ -395,11 +492,16 @@ export class DocumentStorageService {
 
     return new Promise((resolve, reject) => {
       try {
-        const tx = this.db!.transaction([STORES.METADATA, STORES.CHUNKS], 'readwrite');
+        const tx = this.db!.transaction(
+          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES],
+          'readwrite'
+        );
         const metaStore = tx.objectStore(STORES.METADATA);
         const chunksStore = tx.objectStore(STORES.CHUNKS);
+        const structuresStore = tx.objectStore(STORES.STRUCTURES);
 
         metaStore.delete(id);
+        structuresStore.delete(id);
 
         // Delete all chunks for this document
         const index = chunksStore.index('documentId');
@@ -417,6 +519,7 @@ export class DocumentStorageService {
         tx.onerror = () => reject(tx.error);
       } catch (err) {
         this.memoryMetadata.delete(id);
+        this.memoryStructures.delete(id);
         resolve();
       }
     });
@@ -476,12 +579,13 @@ export class DocumentStorageService {
   }
 
   /**
-   * Clears all metadata and chunks.
+   * Clears all metadata, chunks, and structures.
    */
   public async clearAll(): Promise<void> {
     await this.initialize();
     this.memoryMetadata.clear();
     this.memoryChunks.clear();
+    this.memoryStructures.clear();
 
     if (this.isFallbackMode || !this.db) {
       return;
@@ -489,9 +593,13 @@ export class DocumentStorageService {
 
     return new Promise((resolve, reject) => {
       try {
-        const tx = this.db!.transaction([STORES.METADATA, STORES.CHUNKS], 'readwrite');
+        const tx = this.db!.transaction(
+          [STORES.METADATA, STORES.CHUNKS, STORES.STRUCTURES],
+          'readwrite'
+        );
         tx.objectStore(STORES.METADATA).clear();
         tx.objectStore(STORES.CHUNKS).clear();
+        tx.objectStore(STORES.STRUCTURES).clear();
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       } catch {

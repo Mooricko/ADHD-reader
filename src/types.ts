@@ -160,6 +160,8 @@ export interface SavedDocument {
   fileName?: string;
   direction?: 'ltr' | 'rtl';
   totalCharacters?: number;
+  pageCount?: number;
+  hasStructure?: boolean;
 }
 
 export type InputSourceType = 'text' | 'url' | 'txt' | 'markdown' | 'pdf';
@@ -182,6 +184,8 @@ export interface DocumentMetadata {
   lastReadWordIndex: number;
   category?: string;
   totalChunks?: number;
+  pageCount?: number;
+  hasStructure?: boolean;
 }
 
 /**
@@ -236,6 +240,146 @@ export interface ReaderDocumentHandle {
   }>;
   getFullText(): Promise<string>;
   updateProgress(wordIndex: number): Promise<void>;
+  // Phase 3 extensions
+  getStructure(): Promise<DocumentStructure | null>;
+  getPages(): Promise<PageIndexEntry[] | null>;
+  resolvePosition(position: DocumentPosition): Promise<ResolvedDocumentPosition>;
+  resolvePage(pageNumber: number): Promise<ResolvedDocumentPosition>;
+  resolveChapter(chapterId: string): Promise<ResolvedDocumentPosition>;
+  resolveSection(sectionId: string): Promise<ResolvedDocumentPosition>;
+  resolveWordIndex(wordIndex: number): Promise<ResolvedDocumentPosition>;
+  search(query: string, options?: SearchOptions): Promise<SearchResult[]>;
+}
+
+/**
+ * Phase 3 Source-Aware Document Position
+ * Supports resolving chapters, sections, PDF pages, paragraphs, percentages,
+ * or raw word indices into one canonical reading position.
+ */
+export type DocumentPosition =
+  | {
+      kind: 'word';
+      wordIndex: number;
+    }
+  | {
+      kind: 'pdf-page';
+      pageNumber: number; // 1-based page number
+      wordOffset?: number; // Word offset from start of page (default 0)
+    }
+  | {
+      kind: 'chapter';
+      chapterId: string;
+      wordOffset?: number; // Word offset from start of chapter (default 0)
+    }
+  | {
+      kind: 'section';
+      sectionId: string;
+      wordOffset?: number; // Word offset from start of section (default 0)
+    }
+  | {
+      kind: 'paragraph';
+      paragraphIndex: number; // 0-based paragraph index
+      wordOffset?: number; // Word offset from start of paragraph (default 0)
+    }
+  | {
+      kind: 'percent';
+      percent: number; // 0 to 100
+    };
+
+/**
+ * Phase 3 Resolved Canonical Reading Position
+ * Contains the definitive word index and chunk position for the RSVP engine,
+ * along with structural context (chapter, section, page).
+ */
+export interface ResolvedDocumentPosition {
+  documentId: string;
+  globalWordIndex: number;
+  chunkIndex: number;
+  wordIndexInChunk: number;
+  progressPercent: number;
+  totalWords: number;
+  pageNumber?: number; // 1-based PDF page if paginated
+  chapter?: StructuralNode;
+  section?: StructuralNode;
+  paragraphIndex?: number;
+}
+
+/**
+ * Phase 3 Structural Node
+ * Represents a chapter, section, or subsection in a document.
+ */
+export interface StructuralNode {
+  id: string;
+  title: string;
+  level: number; // 1 for H1 / Chapter, 2 for H2 / Section, 3 for H3 / Subsection
+  startWordIndex: number;
+  endWordIndex: number;
+  pageStart?: number; // 1-based PDF page if document is paginated
+  pageEnd?: number;
+  startCharIndex?: number;
+  endCharIndex?: number;
+  parentId?: string;
+  children?: StructuralNode[];
+}
+
+/**
+ * Phase 3 PDF Page Index Entry
+ * Exact word and character boundaries for each physical page in a PDF document.
+ * (Never created for non-paginated sources like plain TXT or Markdown).
+ */
+export interface PageIndexEntry {
+  pageNumber: number; // 1-based page number
+  startWordIndex: number;
+  endWordIndex: number;
+  wordCount: number;
+  startCharIndex?: number;
+  endCharIndex?: number;
+  textPreview?: string;
+}
+
+/**
+ * Phase 3 Paragraph Index Entry
+ */
+export interface ParagraphIndexEntry {
+  paragraphIndex: number;
+  startWordIndex: number;
+  endWordIndex: number;
+  wordCount: number;
+  preview?: string;
+}
+
+/**
+ * Phase 3 Complete Document Structure & Navigation Index
+ */
+export interface DocumentStructure {
+  documentId: string;
+  chapters: StructuralNode[]; // Level 1 chapters / top-level structural units
+  sections: StructuralNode[]; // Flattened array of all chapters and sections for O(1) id lookup
+  pages?: PageIndexEntry[]; // Present ONLY for paginated sources (PDF), NEVER for plain text
+  paragraphs?: ParagraphIndexEntry[];
+  createdAt: number;
+}
+
+/**
+ * Phase 3 Search-Ready API Types
+ */
+export interface SearchResult {
+  documentId: string;
+  globalWordIndex: number;
+  chunkIndex: number;
+  wordIndexInChunk: number;
+  pageNumber?: number;
+  chapterTitle?: string;
+  sectionTitle?: string;
+  snippet: string;
+  matchTerm: string;
+}
+
+export interface SearchOptions {
+  caseSensitive?: boolean;
+  maxResults?: number;
+  startWordIndex?: number;
+  endWordIndex?: number;
 }
 
 export interface UrlPreviewData {
@@ -258,6 +402,8 @@ export interface ReaderDocument {
   content: string;
   language?: string;
   direction?: 'ltr' | 'rtl';
+  pages?: PageIndexEntry[]; // Present for PDFs
+  structure?: DocumentStructure;
   metadata?: {
     author?: string;
     pageCount?: number;
