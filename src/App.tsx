@@ -8,7 +8,9 @@ import {
   ReaderSettings, 
   ReaderViewMode, 
   SavedDocument, 
-  HighlightedWordParts 
+  HighlightedWordParts,
+  ReaderDocument,
+  InputSourceType
 } from './types';
 import { SAMPLE_TEXTS } from './data/sampleTexts';
 import { parseTextIntoWords, countWordsFast } from './utils/textParser';
@@ -32,6 +34,9 @@ import {
 import { useReadingHeatmap } from './hooks/useReadingHeatmap';
 import { useSmartAutoPause, AutoPauseReason } from './hooks/useSmartAutoPause';
 import { calculateWarmupStatus, WARMUP_TOTAL_WORDS } from './utils/smartPacing';
+import { documentStorageService } from './services/document/documentStorageService';
+import { createDocumentHandle } from './services/document/documentHandle';
+import { migrateLocalStorageToIndexedDB, DOCUMENT_STORAGE_KEYS } from './services/document/migration';
 import { CheckCircle2, Zap, Upload } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReaderSettings = {
@@ -69,12 +74,14 @@ const DEFAULT_SETTINGS: ReaderSettings = {
 };
 
 const STORAGE_KEYS = {
-  SETTINGS: 'adhd_reader_settings_v1',
-  VIEW_MODE: 'adhd_reader_view_mode_v1',
-  CURRENT_TEXT: 'adhd_reader_text_v1',
-  CURRENT_TITLE: 'adhd_reader_title_v1',
-  SAVED_DOCS: 'adhd_reader_saved_docs_v1',
-  CURRENT_INDEX: 'adhd_reader_index_v1',
+  SETTINGS: DOCUMENT_STORAGE_KEYS.SETTINGS,
+  VIEW_MODE: DOCUMENT_STORAGE_KEYS.VIEW_MODE,
+  CURRENT_TEXT: DOCUMENT_STORAGE_KEYS.CURRENT_TEXT,
+  CURRENT_TITLE: DOCUMENT_STORAGE_KEYS.CURRENT_TITLE,
+  SAVED_DOCS: DOCUMENT_STORAGE_KEYS.SAVED_DOCS,
+  CURRENT_INDEX: DOCUMENT_STORAGE_KEYS.CURRENT_INDEX,
+  ACTIVE_DOC_ID: DOCUMENT_STORAGE_KEYS.ACTIVE_DOC_ID,
+  MIGRATION_V2_DONE: DOCUMENT_STORAGE_KEYS.MIGRATION_V2_DONE,
 };
 
 export default function App() {
@@ -151,6 +158,71 @@ export default function App() {
     }
     return SAMPLE_TEXTS;
   });
+
+  const [activeDocId, setActiveDocId] = useState<string>(() => {
+    try {
+      const saved = safeStorage.getItem(STORAGE_KEYS.ACTIVE_DOC_ID);
+      if (saved) return saved;
+    } catch {
+      // Ignore
+    }
+    return SAMPLE_TEXTS[0].id;
+  });
+
+  // Phase 2 ReaderDocumentHandle abstraction
+  const activeDocumentHandle = useMemo(() => {
+    return createDocumentHandle(activeDocId);
+  }, [activeDocId]);
+
+  // Phase 2: Run backward-compatible IndexedDB migration and load active document
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initStorageLayer() {
+      try {
+        await migrateLocalStorageToIndexedDB();
+
+        // Refresh document list from IndexedDB metadata
+        const dbDocs = await documentStorageService.listDocuments();
+        if (isMounted && dbDocs.length > 0) {
+          const lightweight: SavedDocument[] = dbDocs.map((meta) => ({
+            id: meta.id,
+            title: meta.title,
+            wordCount: meta.totalWords,
+            lastReadIndex: meta.lastReadWordIndex,
+            lastReadDate: new Date(meta.updatedAt).toISOString(),
+            category: meta.category,
+            sourceType: meta.sourceType,
+            sourceUrl: meta.sourceUrl,
+            fileName: meta.fileName,
+            direction: meta.direction,
+            totalCharacters: meta.totalCharacters,
+          }));
+          setSavedDocs(lightweight);
+        }
+
+        // If an active doc ID exists, load its text from IndexedDB
+        const storedActiveId = safeStorage.getItem(STORAGE_KEYS.ACTIVE_DOC_ID);
+        const targetId = storedActiveId || activeDocId;
+        if (targetId) {
+          const docText = await documentStorageService.getDocumentText(targetId);
+          const meta = await documentStorageService.getMetadata(targetId);
+          if (isMounted && docText) {
+            setCurrentText(docText);
+            if (meta?.title) setCurrentTitle(meta.title);
+          }
+        }
+      } catch (err) {
+        console.warn('Phase 2 storage layer initialization error:', err);
+      }
+    }
+
+    initStorageLayer();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // 3. Playback & navigation state
   const [currentIndex, setCurrentIndex] = useState<number>(() => {
@@ -431,47 +503,95 @@ export default function App() {
     }
   }, [currentText, parsedWords.length]);
 
-  // Save text changes
-  const handleApplyText = useCallback((text: string, title?: string) => {
-    const validText = text && text.trim() ? text : SAMPLE_TEXTS[0].text;
-    const validTitle = title || 'Custom Reading';
-    setCurrentText(validText);
-    setCurrentTitle(validTitle);
-    setCurrentIndex(0);
-    setIsPlaying(false);
-    setSessionWordsRead(0);
+  // Save text changes via Phase 2 Scalable Document Service
+  const handleApplyText = useCallback(
+    async (
+      text: string,
+      title?: string,
+      existingId?: string,
+      options?: Partial<SavedDocument>
+    ) => {
+      const validText = text && text.trim() ? text : SAMPLE_TEXTS[0].text;
+      const validTitle = title || 'Custom Reading';
+      const docId =
+        existingId || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    try {
-      safeStorage.setItem(STORAGE_KEYS.CURRENT_TEXT, validText);
-      safeStorage.setItem(STORAGE_KEYS.CURRENT_TITLE, validTitle);
-      safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, '0');
+      setCurrentText(validText);
+      setCurrentTitle(validTitle);
+      setActiveDocId(docId);
+      setCurrentIndex(0);
+      setIsPlaying(false);
+      setSessionWordsRead(0);
 
-      // Update or add to saved docs
-      setSavedDocs((prev) => {
-        const existingIdx = prev.findIndex((d) => d.title === validTitle);
-        const newDoc: SavedDocument = {
-          id: existingIdx >= 0 ? prev[existingIdx].id : `doc-${Date.now()}`,
+      try {
+        // 1. Asynchronously persist metadata + chunks to IndexedDB
+        const { metadata } = await documentStorageService.createAndSaveDocument({
+          id: docId,
           title: validTitle,
           text: validText,
-          wordCount: countWordsFast(validText),
-          lastReadIndex: 0,
-          lastReadDate: new Date().toISOString(),
-        };
+          sourceType: options?.sourceType || 'text',
+          sourceUrl: options?.sourceUrl,
+          fileName: options?.fileName,
+          direction: options?.direction,
+          category: options?.category,
+          lastReadWordIndex: 0,
+        });
 
-        let updated: SavedDocument[];
-        if (existingIdx >= 0) {
-          updated = [...prev];
-          updated[existingIdx] = newDoc;
-        } else {
-          updated = [newDoc, ...prev];
-        }
-        safeStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(updated));
-        return updated;
+        // 2. Persist ONLY lightweight pointers to localStorage (never store giant raw text)
+        safeStorage.setItem(STORAGE_KEYS.ACTIVE_DOC_ID, docId);
+        safeStorage.setItem(STORAGE_KEYS.CURRENT_TITLE, validTitle);
+        safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, '0');
+        safeStorage.removeItem(STORAGE_KEYS.CURRENT_TEXT);
+
+        // 3. Update lightweight saved docs in React state and localStorage
+        setSavedDocs((prev) => {
+          const existingIdx = prev.findIndex(
+            (d) => d.id === docId || d.title === validTitle
+          );
+          const newDoc: SavedDocument = {
+            id: docId,
+            title: validTitle,
+            wordCount: metadata.totalWords,
+            lastReadIndex: 0,
+            lastReadDate: new Date().toISOString(),
+            category: options?.category,
+            sourceType: options?.sourceType || 'text',
+            sourceUrl: options?.sourceUrl,
+            fileName: options?.fileName,
+            direction: metadata.direction,
+            totalCharacters: metadata.totalCharacters,
+          };
+
+          let updated: SavedDocument[];
+          if (existingIdx >= 0) {
+            updated = [...prev];
+            updated[existingIdx] = newDoc;
+          } else {
+            updated = [newDoc, ...prev];
+          }
+          safeStorage.setItem(STORAGE_KEYS.SAVED_DOCS, JSON.stringify(updated));
+          return updated;
+        });
+      } catch (err) {
+        console.error('Error saving document to IndexedDB storage:', err);
+      }
+    },
+    []
+  );
+
+  // Import handler for structured ReaderDocument objects
+  const handleImportDocument = useCallback(
+    (doc: ReaderDocument) => {
+      const title = doc.title || doc.fileName || 'Imported Reading';
+      handleApplyText(doc.content, title, doc.id, {
+        sourceType: doc.sourceType,
+        sourceUrl: doc.sourceUrl,
+        fileName: doc.fileName,
+        direction: doc.direction,
       });
-    } catch {
-      // Ignore
-    }
-  }, []);
+    },
+    [handleApplyText]
+  );
 
   // Check for captured text from Chrome Extension (URL params, storage, or runtime message)
   useEffect(() => {
@@ -538,6 +658,11 @@ export default function App() {
   }, [handleApplyText, showToast]);
 
   const handleDeleteDocument = useCallback((id: string) => {
+    // Delete from IndexedDB asynchronously
+    documentStorageService.deleteDocument(id).catch((err) => {
+      console.warn('Error deleting document from IndexedDB:', err);
+    });
+
     setSavedDocs((prev) => {
       const filtered = prev.filter((d) => d.id !== id);
       try {
@@ -555,14 +680,19 @@ export default function App() {
 
   const flushIndexSave = useCallback(() => {
     if (pendingIndexSaveRef.current !== null) {
+      const idx = pendingIndexSaveRef.current;
       try {
-        safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, pendingIndexSaveRef.current.toString());
+        safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, idx.toString());
       } catch {
         // Ignore
       }
+      // Also update progress in IndexedDB asynchronously
+      if (activeDocId) {
+        documentStorageService.updateReadingProgress(activeDocId, idx).catch(() => {});
+      }
       pendingIndexSaveRef.current = null;
     }
-  }, []);
+  }, [activeDocId]);
 
   // Save index on change (React state updates immediately; storage write is debounced)
   const handleIndexChange = useCallback((newIdx: number) => {
@@ -914,6 +1044,7 @@ export default function App() {
         currentText={currentText}
         currentTitle={currentTitle}
         onApplyText={handleApplyText}
+        onImportDocument={handleImportDocument}
         savedDocuments={savedDocs}
         onSaveDocument={(doc) => setSavedDocs((prev) => [doc, ...prev])}
         onDeleteDocument={handleDeleteDocument}

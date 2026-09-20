@@ -10,6 +10,7 @@ interface TextInputModalProps {
   currentText: string;
   currentTitle: string;
   onApplyText: (text: string, title?: string) => void;
+  onImportDocument?: (doc: ReaderDocument) => void;
   savedDocuments: SavedDocument[];
   onSaveDocument?: (doc: SavedDocument) => void;
   onDeleteDocument?: (id: string) => void;
@@ -23,6 +24,7 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
   currentText,
   currentTitle,
   onApplyText,
+  onImportDocument,
   savedDocuments,
   onDeleteDocument,
   onOpenExtensionHub,
@@ -34,8 +36,12 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor] || HIGHLIGHT_COLORS.red;
 
   const handleImportDocument = (doc: ReaderDocument) => {
-    const title = doc.title || doc.fileName || 'Imported Reading';
-    onApplyText(doc.content, title);
+    if (onImportDocument) {
+      onImportDocument(doc);
+    } else {
+      const title = doc.title || doc.fileName || 'Imported Reading';
+      onApplyText(doc.content, title);
+    }
     onClose();
   };
 

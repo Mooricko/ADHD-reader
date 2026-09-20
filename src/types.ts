@@ -150,14 +150,93 @@ export interface ReadingStatsSummary {
 export interface SavedDocument {
   id: string;
   title: string;
-  text: string;
+  text?: string; // Optional in Phase 2 so large documents don't require full text in memory / localStorage
   wordCount: number;
   lastReadIndex: number;
   lastReadDate: string;
   category?: string;
+  sourceType?: InputSourceType;
+  sourceUrl?: string;
+  fileName?: string;
+  direction?: 'ltr' | 'rtl';
+  totalCharacters?: number;
 }
 
 export type InputSourceType = 'text' | 'url' | 'txt' | 'markdown' | 'pdf';
+
+/**
+ * Phase 2 Scalable Document Model:
+ * DocumentMetadata represents the lightweight catalog record stored in IndexedDB.
+ */
+export interface DocumentMetadata {
+  id: string;
+  title: string;
+  sourceType: InputSourceType;
+  sourceUrl?: string;
+  fileName?: string;
+  direction?: 'ltr' | 'rtl';
+  totalCharacters: number;
+  totalWords: number;
+  createdAt: number;
+  updatedAt: number;
+  lastReadWordIndex: number;
+  category?: string;
+  totalChunks?: number;
+}
+
+/**
+ * Phase 2 Scalable Document Model:
+ * DocumentChunk represents a discrete, indexable slice of text stored in IndexedDB.
+ */
+export interface DocumentChunk {
+  documentId: string;
+  chunkIndex: number;
+  startWordIndex: number;
+  endWordIndex: number;
+  text: string;
+  wordCount: number;
+  startCharIndex?: number;
+  endCharIndex?: number;
+}
+
+/**
+ * Phase 2 Scalable Document Model:
+ * DocumentLocationIndex maps word indices to chunks for fast O(1) or O(log N) lookup.
+ */
+export interface DocumentLocationIndex {
+  documentId: string;
+  totalChunks: number;
+  totalWords: number;
+  totalCharacters: number;
+  chunkRanges: Array<{
+    chunkIndex: number;
+    startWordIndex: number;
+    endWordIndex: number;
+    wordCount: number;
+  }>;
+}
+
+/**
+ * Phase 2 ReaderDocumentHandle:
+ * Clean application-level interface allowing readers to request content
+ * without knowing how the document is physically stored.
+ */
+export interface ReaderDocumentHandle {
+  readonly id: string;
+  getMetadata(): Promise<DocumentMetadata>;
+  getChunk(chunkIndex: number): Promise<DocumentChunk | null>;
+  getAdjacentChunks(currentChunkIndex: number, radius?: number): Promise<DocumentChunk[]>;
+  getWordsInRange(startWordIndex: number, endWordIndex: number): Promise<string[]>;
+  getParagraphs(): Promise<string[]>;
+  getLocationInfo(wordIndex: number): Promise<{
+    chunkIndex: number;
+    wordIndexInChunk: number;
+    progressPercent: number;
+    totalWords: number;
+  }>;
+  getFullText(): Promise<string>;
+  updateProgress(wordIndex: number): Promise<void>;
+}
 
 export interface UrlPreviewData {
   url: string;

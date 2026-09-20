@@ -23,6 +23,7 @@ import { calculateTextStats, isRtlText } from '../../utils/textParser';
 import { classifyDocumentScale } from '../../utils/performanceDiagnostics';
 import { HIGHLIGHT_COLORS, THEME_CONFIGS } from '../../utils/themeStyles';
 import { SAMPLE_TEXTS } from '../../data/sampleTexts';
+import { documentStorageService } from '../../services/document/documentStorageService';
 
 interface InputHubProps {
   currentText: string;
@@ -220,12 +221,13 @@ export const InputHub: React.FC<InputHubProps> = ({
 
   // Samples selection
   const handleSelectSample = (sample: SavedDocument) => {
+    const text = sample.text || '';
     const doc: ReaderDocument = {
       id: sample.id,
-      sourceType: 'text',
+      sourceType: sample.sourceType || 'text',
       title: sample.title,
-      content: sample.text,
-      direction: isRtlText(sample.text) ? 'rtl' : 'ltr',
+      content: text,
+      direction: sample.direction || (isRtlText(text) ? 'rtl' : 'ltr'),
       metadata: {
         wordCount: sample.wordCount,
       },
@@ -234,14 +236,32 @@ export const InputHub: React.FC<InputHubProps> = ({
     onClose?.();
   };
 
-  // History selection
-  const handleSelectHistory = (historyItem: SavedDocument) => {
+  // History selection - loads full document text asynchronously if not in memory
+  const handleSelectHistory = async (historyItem: SavedDocument) => {
+    let content = historyItem.text;
+    if (!content) {
+      const dbText = await documentStorageService.getDocumentText(historyItem.id);
+      if (dbText) {
+        content = dbText;
+      }
+    }
+    if (!content) {
+      const sample = SAMPLE_TEXTS.find((s) => s.id === historyItem.id);
+      if (sample && sample.text) {
+        content = sample.text;
+      }
+    }
+    if (!content) {
+      console.warn(`[InputHub] Could not load text for history document ${historyItem.id}`);
+      return;
+    }
+
     const doc: ReaderDocument = {
       id: historyItem.id,
-      sourceType: 'text',
+      sourceType: historyItem.sourceType || 'text',
       title: historyItem.title,
-      content: historyItem.text,
-      direction: isRtlText(historyItem.text) ? 'rtl' : 'ltr',
+      content,
+      direction: historyItem.direction || (isRtlText(content) ? 'rtl' : 'ltr'),
       metadata: {
         wordCount: historyItem.wordCount,
       },
