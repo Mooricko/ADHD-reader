@@ -24,6 +24,7 @@ import { classifyDocumentScale } from '../../utils/performanceDiagnostics';
 import { HIGHLIGHT_COLORS, THEME_CONFIGS } from '../../utils/themeStyles';
 import { SAMPLE_TEXTS } from '../../data/sampleTexts';
 import { documentStorageService } from '../../services/document/documentStorageService';
+import { workerProcessingService } from '../../services/worker/workerProcessingService';
 
 interface InputHubProps {
   currentText: string;
@@ -56,6 +57,17 @@ export const InputHub: React.FC<InputHubProps> = ({
   const [copySuccess, setCopySuccess] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentImportIdRef = useRef<string | null>(null);
+
+  // Clean up any ongoing worker tasks when InputHub unmounts
+  useEffect(() => {
+    return () => {
+      if (currentImportIdRef.current) {
+        workerProcessingService.cancelDocument(currentImportIdRef.current);
+      }
+    };
+  }, []);
+
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor] || HIGHLIGHT_COLORS.red;
   const theme = THEME_CONFIGS[settings.theme] || THEME_CONFIGS.midnight;
 
@@ -109,28 +121,78 @@ export const InputHub: React.FC<InputHubProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [pastedText, docTitle, isDetectedUrl]);
 
-  // Unified import processor
+  // Unified import processor with Web Worker chunked processing and cancellation
   const handleProcessInput = async (
     input: File | Blob | string,
     forcedType?: any,
     fileName?: string
   ) => {
+    const importTxId = `import-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    currentImportIdRef.current = importTxId;
+
     setImportState({ stage: 'detecting', message: 'Analyzing reading material...' });
 
     try {
+      // 1. Reading & extraction phase
       const doc = await processUniversalInput(input, {
         forcedType,
         fileName,
         title: docTitle || undefined,
         onProgress: (percent, message) => {
+          if (currentImportIdRef.current !== importTxId) return;
+          let stage: any = 'extracting';
+          if (percent < 25) stage = 'reading';
+          else if (percent >= 85) stage = 'indexing';
           setImportState({
-            stage: percent >= 95 ? 'preparing' : 'extracting',
+            stage,
             progress: percent,
             message,
           });
         },
       });
 
+      // Cancellation check
+      if (currentImportIdRef.current !== importTxId) {
+        return;
+      }
+
+      // 2. Off-thread Web Worker document chunked processing (tokenization, RTL detection, highlighting calculation)
+      setImportState({
+        stage: 'processing',
+        message: 'Processing document...',
+        progress: 0,
+      });
+
+      workerProcessingService.setActiveDocument(doc.id);
+
+      await workerProcessingService.processDocument({
+        documentId: doc.id,
+        text: doc.content,
+        highlightStyle: settings.highlightStyle,
+        direction: doc.direction,
+        onProgress: (p) => {
+          if (currentImportIdRef.current !== importTxId) return;
+          setImportState({
+            stage: 'processing',
+            message: `Processing document... (${p.completedChunks}/${p.totalChunks} chunks)`,
+            progress: p.percent,
+          });
+        },
+      });
+
+      // Cancellation check
+      if (currentImportIdRef.current !== importTxId) {
+        return;
+      }
+
+      // 3. Preparing reader phase
+      setImportState({
+        stage: 'preparing',
+        message: 'Preparing reader...',
+        progress: 100,
+      });
+
+      // 4. Ready state
       setImportState({
         stage: 'ready',
         message: `Ready — ${doc.metadata?.wordCount || 'Multiple'} words`,
@@ -139,16 +201,18 @@ export const InputHub: React.FC<InputHubProps> = ({
 
       // Brief delay so user sees the success state, then activate reader
       setTimeout(() => {
-        onImportDocument(doc);
-        onClose?.();
-      }, 400);
+        if (currentImportIdRef.current === importTxId) {
+          onImportDocument(doc);
+          onClose?.();
+        }
+      }, 350);
     } catch (err: any) {
+      if (currentImportIdRef.current !== importTxId) return;
       console.error('Import failure:', err);
-      const errMsg = err?.message || "Couldn't extract readable text.";
       const isUrl = typeof input === 'string' && isUrlString(input);
       setImportState({
         stage: 'error',
-        error: errMsg,
+        error: "Couldn't finish preparing this document.",
         detectedType: typeof input === 'string' ? (isUrl ? 'url' : 'text') : (input as File).name?.endsWith('.pdf') ? 'pdf' : 'text',
         sourceUrl: isUrl ? (input as string) : undefined,
       });

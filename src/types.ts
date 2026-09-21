@@ -232,6 +232,10 @@ export interface ReaderDocumentHandle {
   readonly id: string;
   getMetadata(): Promise<DocumentMetadata>;
   getChunk(chunkIndex: number): Promise<DocumentChunk | null>;
+  getProcessedWordsForChunk(
+    chunkIndex: number,
+    highlightStyle?: HighlightStyle
+  ): Promise<HighlightedWordParts[]>;
   getAdjacentChunks(currentChunkIndex: number, radius?: number): Promise<DocumentChunk[]>;
   getWordsInRange(startWordIndex: number, endWordIndex: number): Promise<string[]>;
   getParagraphs(): Promise<string[]>;
@@ -415,7 +419,16 @@ export interface ReaderDocument {
   };
 }
 
-export type ImportStage = 'idle' | 'detecting' | 'reading' | 'extracting' | 'preparing' | 'ready' | 'error';
+export type ImportStage =
+  | 'idle'
+  | 'detecting'
+  | 'reading'
+  | 'extracting'
+  | 'indexing'
+  | 'processing'
+  | 'preparing'
+  | 'ready'
+  | 'error';
 
 export interface ImportState {
   stage: ImportStage;

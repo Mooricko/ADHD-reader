@@ -16,6 +16,8 @@ import {
   SearchOptions,
   SearchResult,
   DocumentLocationIndex,
+  HighlightStyle,
+  HighlightedWordParts,
 } from '../../types';
 import { documentStorageService } from './documentStorageService';
 import { findChunkIndexForWord } from './chunking';
@@ -28,17 +30,27 @@ import {
   resolveWordIndex,
 } from '../structure/locationResolver';
 import { searchDocument } from '../structure/searchIndex';
+import { DEFAULT_ACTIVE_CACHE_CHUNKS } from '../worker/workerProtocol';
+import { processChunkPure } from '../worker/chunkProcessor';
 
 export class DocumentHandle implements ReaderDocumentHandle {
   public readonly id: string;
   private cachedMetadata: DocumentMetadata | null = null;
   private cachedStructure: DocumentStructure | null = null;
   private cachedLocationIndex: DocumentLocationIndex | null = null;
+  private maxCachedChunks: number;
   private chunkCache: Map<number, DocumentChunk> = new Map();
+  private processedWordsCache: Map<number, HighlightedWordParts[]> = new Map();
+  private currentActiveChunkIndex: number = 0;
   private fullTextCache: string | null = null;
 
-  constructor(id: string, initialMetadata?: DocumentMetadata) {
+  constructor(
+    id: string,
+    initialMetadata?: DocumentMetadata,
+    maxCachedChunks: number = DEFAULT_ACTIVE_CACHE_CHUNKS
+  ) {
     this.id = id;
+    this.maxCachedChunks = Math.max(1, maxCachedChunks);
     if (initialMetadata) {
       this.cachedMetadata = initialMetadata;
     }
@@ -72,18 +84,28 @@ export class DocumentHandle implements ReaderDocumentHandle {
     const chunk = await documentStorageService.getChunk(this.id, chunkIndex);
     if (chunk) {
       this.chunkCache.set(chunkIndex, chunk);
+      this.enforceCacheLimit();
     }
     return chunk;
   }
 
   /**
+   * Sets the active chunk index and trims hot memory to maintain only the bounded window.
+   */
+  public setActiveChunk(currentChunkIndex: number, windowRadius: number = 1): void {
+    this.currentActiveChunkIndex = currentChunkIndex;
+    this.pruneCaches(currentChunkIndex, windowRadius);
+  }
+
+  /**
    * Retrieves adjacent chunks surrounding currentChunkIndex.
-   * Warms the local handle chunk cache.
+   * Warms the local handle chunk cache within the bounded window limit.
    */
   public async getAdjacentChunks(
     currentChunkIndex: number,
     radius: number = 1
   ): Promise<DocumentChunk[]> {
+    this.currentActiveChunkIndex = currentChunkIndex;
     const chunks = await documentStorageService.getAdjacentChunks(
       this.id,
       currentChunkIndex,
@@ -93,8 +115,56 @@ export class DocumentHandle implements ReaderDocumentHandle {
     for (const c of chunks) {
       this.chunkCache.set(c.chunkIndex, c);
     }
+    this.enforceCacheLimit();
 
     return chunks;
+  }
+
+  /**
+   * Preloads the window around the active chunk and caches processed words if desired.
+   */
+  public async preloadChunkWindow(
+    currentChunkIndex: number,
+    highlightStyle: HighlightStyle = 'middle-two',
+    radius: number = 1
+  ): Promise<DocumentChunk[]> {
+    this.currentActiveChunkIndex = currentChunkIndex;
+    const chunks = await this.getAdjacentChunks(currentChunkIndex, radius);
+    for (const chunk of chunks) {
+      await this.getProcessedWordsForChunk(chunk.chunkIndex, highlightStyle);
+    }
+    return chunks;
+  }
+
+  /**
+   * Retrieves processed word parts for a single chunk, keeping only bounded chunks in memory.
+   */
+  public async getProcessedWordsForChunk(
+    chunkIndex: number,
+    highlightStyle: HighlightStyle = 'middle-two'
+  ): Promise<HighlightedWordParts[]> {
+    if (this.processedWordsCache.has(chunkIndex)) {
+      return this.processedWordsCache.get(chunkIndex)!;
+    }
+
+    const chunk = await this.getChunk(chunkIndex);
+    if (!chunk) return [];
+
+    const meta = await this.getMetadata().catch(() => null);
+    const direction = meta?.direction || 'ltr';
+
+    const processed = processChunkPure({
+      documentId: this.id,
+      chunkIndex,
+      text: chunk.text,
+      startWordIndex: chunk.startWordIndex,
+      highlightStyle,
+      options: { direction },
+    });
+
+    this.processedWordsCache.set(chunkIndex, processed.words);
+    this.enforceCacheLimit();
+    return processed.words;
   }
 
   /**
@@ -112,10 +182,11 @@ export class DocumentHandle implements ReaderDocumentHandle {
       endWordIndex
     );
 
-    // Warm cache
+    // Warm cache boundedly
     for (const c of chunks) {
       this.chunkCache.set(c.chunkIndex, c);
     }
+    this.enforceCacheLimit();
 
     // Combine chunk text and split into words
     const allWords: string[] = [];
@@ -289,14 +360,88 @@ export class DocumentHandle implements ReaderDocumentHandle {
   }
 
   /**
+   * Internal eviction helper to maintain only a small active cache window.
+   */
+  private pruneCaches(centerChunk: number, windowRadius: number = 1): void {
+    const minKeep = centerChunk - windowRadius;
+    const maxKeep = centerChunk + windowRadius;
+
+    for (const chunkIdx of Array.from(this.chunkCache.keys())) {
+      if (chunkIdx < minKeep || chunkIdx > maxKeep) {
+        this.chunkCache.delete(chunkIdx);
+      }
+    }
+
+    for (const chunkIdx of Array.from(this.processedWordsCache.keys())) {
+      if (chunkIdx < minKeep || chunkIdx > maxKeep) {
+        this.processedWordsCache.delete(chunkIdx);
+      }
+    }
+  }
+
+  /**
+   * Enforces the internal bounded memory limit for chunks and processed words.
+   */
+  private enforceCacheLimit(): void {
+    if (this.chunkCache.size > this.maxCachedChunks) {
+      const sortedChunkKeys = Array.from(this.chunkCache.keys()).sort((a, b) => {
+        return Math.abs(b - this.currentActiveChunkIndex) - Math.abs(a - this.currentActiveChunkIndex);
+      });
+      while (this.chunkCache.size > this.maxCachedChunks && sortedChunkKeys.length > 0) {
+        const evictKey = sortedChunkKeys.shift()!;
+        this.chunkCache.delete(evictKey);
+      }
+    }
+
+    if (this.processedWordsCache.size > this.maxCachedChunks) {
+      const sortedWordKeys = Array.from(this.processedWordsCache.keys()).sort((a, b) => {
+        return Math.abs(b - this.currentActiveChunkIndex) - Math.abs(a - this.currentActiveChunkIndex);
+      });
+      while (this.processedWordsCache.size > this.maxCachedChunks && sortedWordKeys.length > 0) {
+        const evictKey = sortedWordKeys.shift()!;
+        this.processedWordsCache.delete(evictKey);
+      }
+    }
+  }
+
+  /**
+   * Returns current count of cached chunks in memory.
+   */
+  public getCachedChunkCount(): number {
+    return this.chunkCache.size;
+  }
+
+  /**
+   * Returns current count of cached processed words chunks in memory.
+   */
+  public getCachedWordsChunkCount(): number {
+    return this.processedWordsCache.size;
+  }
+
+  /**
+   * Returns the maximum allowed chunks in memory.
+   */
+  public getMaxCachedChunks(): number {
+    return this.maxCachedChunks;
+  }
+
+  /**
+   * Clears hot memory caches immediately to release memory.
+   */
+  public clearCache(): void {
+    this.chunkCache.clear();
+    this.processedWordsCache.clear();
+    this.fullTextCache = null;
+  }
+
+  /**
    * Invalidates internal caches if document changed externally.
    */
   public invalidateCache(): void {
     this.cachedMetadata = null;
     this.cachedStructure = null;
     this.cachedLocationIndex = null;
-    this.chunkCache.clear();
-    this.fullTextCache = null;
+    this.clearCache();
   }
 }
 

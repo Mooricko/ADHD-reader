@@ -36,6 +36,7 @@ import { useSmartAutoPause, AutoPauseReason } from './hooks/useSmartAutoPause';
 import { calculateWarmupStatus, WARMUP_TOTAL_WORDS } from './utils/smartPacing';
 import { documentStorageService } from './services/document/documentStorageService';
 import { createDocumentHandle } from './services/document/documentHandle';
+import { workerProcessingService } from './services/worker/workerProcessingService';
 import { migrateLocalStorageToIndexedDB, DOCUMENT_STORAGE_KEYS } from './services/document/migration';
 import { CheckCircle2, Zap, Upload } from 'lucide-react';
 
@@ -469,15 +470,61 @@ export default function App() {
     }
   };
 
+  // State for words processed off-thread by Web Worker for large texts
+  const [workerParsedWords, setWorkerParsedWords] = useState<HighlightedWordParts[] | null>(null);
+
+  // If text is large (> 15,000 chars / ~2,500 words), offload word tokenization & highlighting calculation to Web Worker!
+  useEffect(() => {
+    const textToParse = currentText && currentText.trim() ? currentText : SAMPLE_TEXTS[0].text;
+    if (textToParse.length < 15000) {
+      setWorkerParsedWords(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const docId = activeDocId || 'active-reader-doc';
+
+    workerProcessingService.setActiveDocument(docId);
+    workerProcessingService
+      .processDocument({
+        documentId: docId,
+        text: textToParse,
+        highlightStyle: settings.highlightStyle,
+      })
+      .then((result) => {
+        if (isCancelled) return;
+        const sortedKeys = Array.from(result.chunkWords.keys()).sort((a, b) => a - b);
+        const allWords: HighlightedWordParts[] = [];
+        for (const k of sortedKeys) {
+          allWords.push(...(result.chunkWords.get(k) || []));
+        }
+        if (allWords.length > 0) {
+          setWorkerParsedWords(allWords);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          console.warn('Worker word processing fallback:', err);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentText, settings.highlightStyle, activeDocId]);
+
   // Parse words with the chosen highlight style - guaranteed never empty
   const parsedWords = useMemo<HighlightedWordParts[]>(() => {
+    if (workerParsedWords && workerParsedWords.length > 0) {
+      return workerParsedWords;
+    }
     const textToParse = currentText && currentText.trim() ? currentText : SAMPLE_TEXTS[0].text;
     const words = parseTextIntoWords(textToParse, settings.highlightStyle);
     if (words.length === 0) {
       return parseTextIntoWords(SAMPLE_TEXTS[0].text, settings.highlightStyle);
     }
     return words;
-  }, [currentText, settings.highlightStyle]);
+  }, [currentText, settings.highlightStyle, workerParsedWords]);
 
   // Keep index within bounds
   useEffect(() => {

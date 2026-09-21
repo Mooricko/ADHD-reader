@@ -241,5 +241,23 @@
   transition-delay: 100ms;
 }
 
+/* Metallic Shader Button 3D Utilities */
+.transform-3d {
+  transform-style: preserve-3d;
+}
+.translate-z-0 {
+  transform: translateZ(0px);
+}
+.translate-z-2\.5 {
+  transform: translateZ(10px);
+}
+.translate-z-5 {
+  transform: translateZ(20px);
+}
+.translate-z-6\.25 {
+  transform: translateZ(25px);
+}
+
+
 
 

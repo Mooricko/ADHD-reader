@@ -30,7 +30,7 @@ import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
 import { RSVPMorphWord } from './RSVPMorphWord';
-import { ProudSquidPlayButton } from './ProudSquidPlayButton';
+import { MetallicButton } from './MetallicButton';
 import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { AutoPauseReason } from '../hooks/useSmartAutoPause';
 
@@ -796,15 +796,16 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             </button>
           </div>
 
-          {/* Master Play / Pause Button (Proud Squid 15 UI) */}
-          <ProudSquidPlayButton
+          {/* Master Play / Pause Button (Metallic Shader UI) */}
+          <MetallicButton
             id="rsvp-play-pause-btn"
+            viewMode="icon"
             isPlaying={isPlaying}
-            onToggle={() => {
+            onClick={() => {
               setHasFinished(false);
               onTogglePlay();
             }}
-            accentColor={highlight.hex}
+            sheenColor={highlight.hex}
             title={isPlaying ? 'Pause reading (Space)' : (currentIndex >= words.length - 1 ? 'Read Again (Space)' : 'Play reading (Space)')}
           />
 

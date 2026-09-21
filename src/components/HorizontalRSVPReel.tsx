@@ -7,6 +7,7 @@ import { calculateWordDelayMs } from '../utils/textParser';
 export interface HorizontalRSVPReelProps {
   words: HighlightedWordParts[];
   currentIndex: number;
+  totalWords?: number;
   chunkSize: 1 | 3 | 5;
   isPlaying: boolean;
   settings: ReaderSettings;
@@ -21,6 +22,7 @@ const BUFFER_SIZE = 16;
 export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   words,
   currentIndex,
+  totalWords,
   chunkSize,
   isPlaying,
   settings,
@@ -57,7 +59,13 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   }, [effectiveFontSize]);
 
   // Dynamic animation duration based on word delay & WPM
-  const currentWord = words[currentIndex] || words[0];
+  const currentWord = useMemo(() => {
+    const matched = words.find((w) => w.index === currentIndex);
+    if (matched) return matched;
+    if (words[currentIndex]) return words[currentIndex];
+    return words[0];
+  }, [words, currentIndex]);
+
   const wordDelayMs = useMemo(() => {
     if (!currentWord) return 200;
     return calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause);
@@ -69,18 +77,30 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
     return Math.min(0.26, Math.max(0.07, (wordDelayMs / 1000) * 0.7));
   }, [isPlaying, wordDelayMs]);
 
-  // Chunking to keep DOM nodes stable and prevent layout shifts during GSAP translation
+  // Support both windowed words (where array has subset of words with .index) and flat arrays
+  const hasWindowIndexedWords = words.length > 0 && words.some((w) => w.index !== undefined);
+  const maxDocWords = totalWords || words.length;
+
   const chunkPage = Math.floor(currentIndex / BUFFER_SIZE);
   const chunkStart = Math.max(0, chunkPage * BUFFER_SIZE - 8);
-  const chunkEnd = Math.min(words.length - 1, (chunkPage + 1) * BUFFER_SIZE + 8);
+  const chunkEnd = Math.min(maxDocWords - 1, (chunkPage + 1) * BUFFER_SIZE + 8);
 
   const visibleWords = useMemo(() => {
+    if (hasWindowIndexedWords) {
+      return words
+        .filter((w) => Math.abs(w.index - currentIndex) <= 8)
+        .sort((a, b) => a.index - b.index)
+        .map((w) => ({ word: w, index: w.index }));
+    }
+
     const list: { word: HighlightedWordParts; index: number }[] = [];
     for (let i = chunkStart; i <= chunkEnd; i++) {
-      list.push({ word: words[i], index: i });
+      if (words[i]) {
+        list.push({ word: words[i], index: i });
+      }
     }
     return list;
-  }, [words, chunkStart, chunkEnd]);
+  }, [words, hasWindowIndexedWords, currentIndex, chunkStart, chunkEnd]);
 
   const isTextRtl = Boolean(currentWord?.isRtl);
 

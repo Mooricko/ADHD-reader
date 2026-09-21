@@ -32,7 +32,7 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({
 
           <div className="flex-1 min-w-0">
             <h4 className="text-sm font-semibold text-red-300">
-              {state.error || "Couldn't extract readable text."}
+              {state.error || "Couldn't finish preparing this document."}
             </h4>
             <p className="text-xs text-slate-400 mt-1">
               {state.detectedType === 'url'
@@ -70,11 +70,12 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({
               {onRetry && (
                 <button
                   type="button"
+                  id="import-retry-button"
                   onClick={onRetry}
                   className="px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Try again</span>
+                  <span>Retry</span>
                 </button>
               )}
 
@@ -106,7 +107,7 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({
   }
 
   // Loading or Preparing states
-  const isProcessing = ['detecting', 'reading', 'extracting', 'preparing'].includes(state.stage);
+  const isProcessing = ['detecting', 'reading', 'extracting', 'indexing', 'processing', 'preparing'].includes(state.stage);
 
   if (isProcessing) {
     return (

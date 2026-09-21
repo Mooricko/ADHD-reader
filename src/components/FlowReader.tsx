@@ -17,7 +17,7 @@ import { analyzeWordSmartPace } from '../utils/smartPacing';
 import { metronome } from '../utils/audioMetronome';
 import { speechNarrator } from '../utils/speechNarration';
 import { SpeedSliderToggle } from './SpeedSliderToggle';
-import { ProudSquidPlayButton } from './ProudSquidPlayButton';
+import { MetallicButton } from './MetallicButton';
 import { MarkerHighlight } from './MarkerHighlight';
 import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { LayoutGroup } from 'motion/react';
@@ -526,12 +526,13 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             </span>
           </div>
 
-          {/* Play/Pause (Proud Squid 15 UI) */}
-          <ProudSquidPlayButton
+          {/* Play/Pause (Metallic Shader UI) */}
+          <MetallicButton
             id="flow-play-pause-btn"
+            viewMode="icon"
             isPlaying={isPlaying}
-            onToggle={onTogglePlay}
-            accentColor={highlight.hex}
+            onClick={onTogglePlay}
+            sheenColor={highlight.hex}
             title={isPlaying ? 'Pause Tracker (Space)' : 'Auto-Track Reading (Space)'}
           />
 
