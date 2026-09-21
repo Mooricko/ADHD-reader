@@ -4,7 +4,8 @@ import { ThemeConfig } from '../utils/themeStyles';
 import { Flame, Clock, Info, ChevronUp, ChevronDown, CheckCircle2, Activity } from 'lucide-react';
 
 export interface ReadingHeatmapProgressProps {
-  words: HighlightedWordParts[];
+  words?: HighlightedWordParts[];
+  totalWords?: number;
   currentIndex: number;
   onIndexChange: (index: number) => void;
   heatmapData: ReadingHeatmapData;
@@ -18,6 +19,7 @@ export interface ReadingHeatmapProgressProps {
 
 export const ReadingHeatmapProgress: React.FC<ReadingHeatmapProgressProps> = ({
   words,
+  totalWords: customTotalWords,
   currentIndex,
   onIndexChange,
   heatmapData,
@@ -34,7 +36,7 @@ export const ReadingHeatmapProgress: React.FC<ReadingHeatmapProgressProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [showComplexDrawer, setShowComplexDrawer] = useState(false);
 
-  const totalWords = words.length;
+  const totalWords = customTotalWords !== undefined ? customTotalWords : (words ? words.length : 0);
   const progressPercent = totalWords > 0 ? Math.round(((currentIndex + 1) / totalWords) * 100) : 0;
   const currentPositionPct = totalWords > 0 ? (currentIndex / Math.max(1, totalWords - 1)) * 100 : 0;
 

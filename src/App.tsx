@@ -33,6 +33,7 @@ import {
 } from './utils/extensionBridge';
 import { useReadingHeatmap } from './hooks/useReadingHeatmap';
 import { useSmartAutoPause, AutoPauseReason } from './hooks/useSmartAutoPause';
+import { useReaderWindow } from './hooks/useReaderWindow';
 import { calculateWarmupStatus, WARMUP_TOTAL_WORDS } from './utils/smartPacing';
 import { documentStorageService } from './services/document/documentStorageService';
 import { createDocumentHandle } from './services/document/documentHandle';
@@ -126,17 +127,7 @@ export default function App() {
     return DEFAULT_SETTINGS;
   });
 
-  // 2. Text & Document state
-  const [currentText, setCurrentText] = useState<string>(() => {
-    try {
-      const saved = safeStorage.getItem(STORAGE_KEYS.CURRENT_TEXT);
-      if (saved && typeof saved === 'string' && saved.trim()) return saved;
-    } catch {
-      // Ignore
-    }
-    return SAMPLE_TEXTS[0].text;
-  });
-
+  // 2. Document & Windowed Reader state
   const [currentTitle, setCurrentTitle] = useState<string>(() => {
     try {
       const saved = safeStorage.getItem(STORAGE_KEYS.CURRENT_TITLE);
@@ -175,7 +166,7 @@ export default function App() {
     return createDocumentHandle(activeDocId);
   }, [activeDocId]);
 
-  // Phase 2: Run backward-compatible IndexedDB migration and load active document
+  // Phase 2: Run backward-compatible IndexedDB migration and load active document metadata
   useEffect(() => {
     let isMounted = true;
 
@@ -202,15 +193,16 @@ export default function App() {
           setSavedDocs(lightweight);
         }
 
-        // If an active doc ID exists, load its text from IndexedDB
+        // If an active doc ID exists, load only its metadata from IndexedDB
         const storedActiveId = safeStorage.getItem(STORAGE_KEYS.ACTIVE_DOC_ID);
         const targetId = storedActiveId || activeDocId;
         if (targetId) {
-          const docText = await documentStorageService.getDocumentText(targetId);
           const meta = await documentStorageService.getMetadata(targetId);
-          if (isMounted && docText) {
-            setCurrentText(docText);
-            if (meta?.title) setCurrentTitle(meta.title);
+          if (isMounted && meta) {
+            if (meta.title) setCurrentTitle(meta.title);
+            if (meta.lastReadWordIndex !== undefined && meta.lastReadWordIndex > 0) {
+              setCurrentIndex(meta.lastReadWordIndex);
+            }
           }
         }
       } catch (err) {
@@ -470,85 +462,45 @@ export default function App() {
     }
   };
 
-  // State for words processed off-thread by Web Worker for large texts
-  const [workerParsedWords, setWorkerParsedWords] = useState<HighlightedWordParts[] | null>(null);
+  // Fallback words when handle is initializing or for default sample text
+  const fallbackSampleWords = useMemo(() => {
+    return parseTextIntoWords(SAMPLE_TEXTS[0].text, settings.highlightStyle);
+  }, [settings.highlightStyle]);
 
-  // If text is large (> 15,000 chars / ~2,500 words), offload word tokenization & highlighting calculation to Web Worker!
+  // Phase 4.5: Windowed Reader Hook with chunk caching & prefetching
+  const readerWindow = useReaderWindow({
+    handle: activeDocumentHandle,
+    currentIndex,
+    fallbackWords: fallbackSampleWords,
+    highlightStyle: settings.highlightStyle,
+  });
+
+  const parsedWords = readerWindow.windowWords;
+  const totalWords = readerWindow.totalWords;
+
+  // Keep index within bounds of total document words
   useEffect(() => {
-    const textToParse = currentText && currentText.trim() ? currentText : SAMPLE_TEXTS[0].text;
-    if (textToParse.length < 15000) {
-      setWorkerParsedWords(null);
-      return;
-    }
-
-    let isCancelled = false;
-    const docId = activeDocId || 'active-reader-doc';
-
-    workerProcessingService.setActiveDocument(docId);
-    workerProcessingService
-      .processDocument({
-        documentId: docId,
-        text: textToParse,
-        highlightStyle: settings.highlightStyle,
-      })
-      .then((result) => {
-        if (isCancelled) return;
-        const sortedKeys = Array.from(result.chunkWords.keys()).sort((a, b) => a - b);
-        const allWords: HighlightedWordParts[] = [];
-        for (const k of sortedKeys) {
-          allWords.push(...(result.chunkWords.get(k) || []));
-        }
-        if (allWords.length > 0) {
-          setWorkerParsedWords(allWords);
-        }
-      })
-      .catch((err) => {
-        if (!isCancelled) {
-          console.warn('Worker word processing fallback:', err);
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [currentText, settings.highlightStyle, activeDocId]);
-
-  // Parse words with the chosen highlight style - guaranteed never empty
-  const parsedWords = useMemo<HighlightedWordParts[]>(() => {
-    if (workerParsedWords && workerParsedWords.length > 0) {
-      return workerParsedWords;
-    }
-    const textToParse = currentText && currentText.trim() ? currentText : SAMPLE_TEXTS[0].text;
-    const words = parseTextIntoWords(textToParse, settings.highlightStyle);
-    if (words.length === 0) {
-      return parseTextIntoWords(SAMPLE_TEXTS[0].text, settings.highlightStyle);
-    }
-    return words;
-  }, [currentText, settings.highlightStyle, workerParsedWords]);
-
-  // Keep index within bounds
-  useEffect(() => {
-    if (parsedWords.length > 0 && currentIndex >= parsedWords.length) {
+    if (totalWords > 0 && currentIndex >= totalWords) {
       setCurrentIndex(0);
     }
-  }, [parsedWords.length, currentIndex]);
+  }, [totalWords, currentIndex]);
 
   // Dev-only timing instrumentation for initial reader render
-  const lastRenderedTextRef = useRef<string | null>(null);
+  const lastRenderedDocRef = useRef<string | null>(null);
   useEffect(() => {
-    if (lastRenderedTextRef.current !== currentText) {
-      lastRenderedTextRef.current = currentText;
+    if (lastRenderedDocRef.current !== activeDocId) {
+      lastRenderedDocRef.current = activeDocId;
       const start = performance.now();
       requestAnimationFrame(() => {
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         logDevDiagnostic('initial reader render', {
           durationMs,
-          charCount: currentText.length,
-          wordCount: parsedWords.length,
+          totalWords,
+          activeDocId,
         });
       });
     }
-  }, [currentText, parsedWords.length]);
+  }, [activeDocId, totalWords]);
 
   // Save text changes via Phase 2 Scalable Document Service
   const handleApplyText = useCallback(
@@ -566,7 +518,6 @@ export default function App() {
       const docId =
         existingId || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-      setCurrentText(validText);
       setCurrentTitle(validTitle);
       setActiveDocId(docId);
       setCurrentIndex(0);
@@ -785,10 +736,10 @@ export default function App() {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  const parsedWordsLengthRef = useRef(parsedWords.length);
+  const totalWordsRef = useRef(totalWords);
   useEffect(() => {
-    parsedWordsLengthRef.current = parsedWords.length;
-  }, [parsedWords.length]);
+    totalWordsRef.current = totalWords;
+  }, [totalWords]);
 
   // Smart Auto-Pause state
   const [isAutoPaused, setIsAutoPaused] = useState(false);
@@ -813,7 +764,7 @@ export default function App() {
     setIsAutoPaused(false);
     setAutoPauseReason(null);
     setIsPlaying((prev) => {
-      if (!prev && currentIndexRef.current >= parsedWordsLengthRef.current - 1) {
+      if (!prev && currentIndexRef.current >= totalWordsRef.current - 1) {
         handleIndexChange(0);
         return true;
       }
@@ -883,7 +834,7 @@ export default function App() {
         handleIndexChange(Math.max(0, currentIndex - (e.shiftKey ? 1 : 10)));
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        handleIndexChange(Math.min(parsedWords.length - 1, currentIndex + (e.shiftKey ? 1 : 10)));
+        handleIndexChange(Math.min(totalWords - 1, currentIndex + (e.shiftKey ? 1 : 10)));
       } else if (e.code === 'ArrowUp') {
         e.preventDefault();
         handleUpdateSettings({ wpm: Math.min(1000, settings.wpm + 25) });
@@ -925,11 +876,11 @@ export default function App() {
     handleRestart, 
     settings.wpm, 
     settings.metronomeSound, 
-    settings.speechNarration,
-    settings.theme,
-    parsedWords.length, 
+    settings.speechNarration, 
+    settings.theme, 
+    totalWords, 
     currentIndex, 
-    handleUpdateSettings,
+    handleUpdateSettings, 
     showToast
   ]);
 
@@ -983,6 +934,7 @@ export default function App() {
   // Heatmap Dwell Time & Complexity Tracking Engine
   const { heatmapData, statsSummary, resetHeatmap, clearAllStats } = useReadingHeatmap({
     words: parsedWords,
+    totalWords,
     currentIndex,
     isPlaying,
     wpm: settings.wpm,
@@ -1031,6 +983,9 @@ export default function App() {
         {viewMode === 'rsvp' ? (
           <RSVPReader
             words={parsedWords}
+            totalWords={totalWords}
+            handle={activeDocumentHandle}
+            getWordsSlice={readerWindow.getWordsSlice}
             currentIndex={currentIndex}
             onIndexChange={handleIndexChange}
             isPlaying={isPlaying}
@@ -1053,6 +1008,9 @@ export default function App() {
         ) : (
           <FlowReader
             words={parsedWords}
+            totalWords={totalWords}
+            handle={activeDocumentHandle}
+            getWordsSlice={readerWindow.getWordsSlice}
             currentIndex={currentIndex}
             onIndexChange={handleIndexChange}
             isPlaying={isPlaying}
@@ -1087,7 +1045,7 @@ export default function App() {
           <div
             className="absolute top-0 bottom-0 w-2.5 -translate-x-1/2 bg-white shadow-md rounded-full"
             style={{
-              left: `${parsedWords.length > 0 ? (currentIndex / Math.max(1, parsedWords.length - 1)) * 100 : 0}%`,
+              left: `${totalWords > 0 ? (currentIndex / Math.max(1, totalWords - 1)) * 100 : 0}%`,
             }}
           />
         </div>
@@ -1097,7 +1055,6 @@ export default function App() {
       <TextInputModal
         isOpen={isTextInputOpen}
         onClose={() => setIsTextInputOpen(false)}
-        currentText={currentText}
         currentTitle={currentTitle}
         onApplyText={handleApplyText}
         onImportDocument={handleImportDocument}

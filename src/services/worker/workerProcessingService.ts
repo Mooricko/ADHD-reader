@@ -39,6 +39,7 @@ export class WorkerProcessingService {
   private worker: Worker | null = null;
   private isFallbackMode: boolean = false;
   private activeDocumentId: string | null = null;
+  private documentSessions = new Map<string, string>();
 
   // Listeners by documentId
   private progressListeners = new Map<string, (p: ProgressPayload) => void>();
@@ -59,11 +60,33 @@ export class WorkerProcessingService {
     {
       resolve: (res: ChunkReadyPayload) => void;
       reject: (err: any) => void;
+      timeoutId?: ReturnType<typeof setTimeout>;
     }
   >();
 
   constructor() {
     this.checkWorkerSupport();
+  }
+
+  /**
+   * Returns or creates a fresh session token for the given documentId.
+   */
+  public getOrCreateSession(documentId: string): string {
+    let session = this.documentSessions.get(documentId);
+    if (!session) {
+      session = `${documentId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      this.documentSessions.set(documentId, session);
+    }
+    return session;
+  }
+
+  /**
+   * Explicitly resets/starts a new session token for the given documentId.
+   */
+  public resetSession(documentId: string): string {
+    const session = `${documentId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.documentSessions.set(documentId, session);
+    return session;
   }
 
   /**
@@ -80,7 +103,7 @@ export class WorkerProcessingService {
   /**
    * Lazily initializes and binds the dedicated Web Worker.
    */
-  private getWorker(): Worker | null {
+  public getWorker(): Worker | null {
     if (this.isFallbackMode) return null;
     if (this.worker) return this.worker;
 
@@ -94,15 +117,25 @@ export class WorkerProcessingService {
       };
 
       this.worker.onerror = (err) => {
-        console.warn('[WorkerProcessingService] Worker error, falling back:', err);
-        this.terminateWorker();
-        // Notify any active document
-        if (this.activeDocumentId) {
-          const callbacks = this.completeResolvers.get(this.activeDocumentId);
-          if (callbacks) {
-            callbacks.reject(new Error("Couldn't finish preparing this document."));
-          }
+        console.warn('[WorkerProcessingService] Worker error, rejecting in-flight requests:', err);
+        const errorMsg = "Couldn't finish preparing this document.";
+        
+        // Reject all in-flight chunk requests
+        for (const [key, req] of this.pendingChunkRequests.entries()) {
+          if (req.timeoutId) clearTimeout(req.timeoutId);
+          req.reject(new Error(errorMsg));
         }
+        this.pendingChunkRequests.clear();
+
+        // Reject all document resolvers
+        for (const [_, docJob] of this.completeResolvers.entries()) {
+          docJob.reject(new Error(errorMsg));
+        }
+        this.completeResolvers.clear();
+        this.chunkListeners.clear();
+        this.progressListeners.clear();
+
+        this.terminateWorker();
       };
 
       return this.worker;
@@ -114,14 +147,30 @@ export class WorkerProcessingService {
   }
 
   /**
+   * Restarts the dedicated worker process cleanly after an unrecoverable failure.
+   */
+  public restartWorker(): Worker | null {
+    this.terminateWorker();
+    this.isFallbackMode = false;
+    this.checkWorkerSupport();
+    return this.getWorker();
+  }
+
+  /**
    * Handles messages returned from the Web Worker.
-   * STRICT GUARANTEE: Silently discards any messages from inactive / stale documents!
+   * Discards messages from inactive or superseded sessions!
    */
   private handleWorkerMessage(msg: WorkerToMainMessage) {
     if (!msg || !msg.documentId) return;
 
+    // Verify session if provided
+    const currentSession = this.documentSessions.get(msg.documentId);
+    if (msg.sessionId && currentSession && msg.sessionId !== currentSession) {
+      return; // Stale session message discarded
+    }
+
     // MANDATORY CANCELLATION CHECK:
-    // If the message is for a document that is no longer active, reject / ignore it immediately!
+    // If the message is for a document that is no longer active, discard it!
     if (msg.documentId !== this.activeDocumentId) {
       return;
     }
@@ -140,6 +189,7 @@ export class WorkerProcessingService {
         const chunkKey = `${msg.documentId}:${msg.chunkIndex}`;
         const singleChunkReq = this.pendingChunkRequests.get(chunkKey);
         if (singleChunkReq) {
+          if (singleChunkReq.timeoutId) clearTimeout(singleChunkReq.timeoutId);
           this.pendingChunkRequests.delete(chunkKey);
           singleChunkReq.resolve(msg);
         }
@@ -174,6 +224,15 @@ export class WorkerProcessingService {
       }
 
       case 'ERROR': {
+        if (msg.chunkIndex !== undefined) {
+          const chunkKey = `${msg.documentId}:${msg.chunkIndex}`;
+          const singleChunkReq = this.pendingChunkRequests.get(chunkKey);
+          if (singleChunkReq) {
+            if (singleChunkReq.timeoutId) clearTimeout(singleChunkReq.timeoutId);
+            this.pendingChunkRequests.delete(chunkKey);
+            singleChunkReq.reject(new Error(msg.error || "Couldn't finish preparing this document."));
+          }
+        }
         const docJob = this.completeResolvers.get(msg.documentId);
         if (docJob) {
           this.cleanupDocument(msg.documentId);
@@ -197,6 +256,7 @@ export class WorkerProcessingService {
       this.cancelDocument(this.activeDocumentId);
     }
     this.activeDocumentId = documentId;
+    this.getOrCreateSession(documentId);
   }
 
   /**
@@ -208,15 +268,19 @@ export class WorkerProcessingService {
 
   /**
    * Cancels a document by ID.
-   * Informs the worker, clears listeners, and rejects pending promises.
+   * Informs the worker with the session token, clears listeners, and rejects pending promises.
+   * Crucially, removes the session so reopening this document gets a fresh unpoisoned session.
    */
   public cancelDocument(documentId: string): void {
-    // 1. If worker is alive, post cancellation
+    const session = this.documentSessions.get(documentId);
+
+    // 1. If worker is alive, post cancellation with sessionId
     if (this.worker) {
       try {
         this.worker.postMessage({
           type: 'CANCEL_DOCUMENT',
           documentId,
+          sessionId: session,
         });
       } catch {
         // Ignore postMessage errors on teardown
@@ -229,10 +293,13 @@ export class WorkerProcessingService {
       docJob.reject(new Error(`Document processing cancelled: ${documentId}`));
     }
 
-    // 3. Clear listeners
+    // 3. Clear listeners and requests
     this.cleanupDocument(documentId);
 
-    // 4. If this was the active document, clear it
+    // 4. Remove session so reopening starts fresh
+    this.documentSessions.delete(documentId);
+
+    // 5. If this was the active document, clear it
     if (this.activeDocumentId === documentId) {
       this.activeDocumentId = null;
     }
@@ -246,6 +313,7 @@ export class WorkerProcessingService {
     // Clear single chunk requests for this document
     for (const [key, req] of this.pendingChunkRequests.entries()) {
       if (key.startsWith(`${documentId}:`)) {
+        if (req.timeoutId) clearTimeout(req.timeoutId);
         req.reject(new Error(`Chunk request cancelled: ${key}`));
         this.pendingChunkRequests.delete(key);
       }
@@ -280,7 +348,7 @@ export class WorkerProcessingService {
   }
 
   /**
-   * Processes a single chunk on-demand.
+   * Processes a single chunk on-demand with session support and timeout guard.
    */
   public async processChunk(
     documentId: string,
@@ -311,12 +379,24 @@ export class WorkerProcessingService {
 
     const worker = this.getWorker()!;
     const chunkKey = `${documentId}:${chunkIndex}`;
+    const sessionId = this.getOrCreateSession(documentId);
+    const requestId = `${chunkKey}:${Date.now()}`;
 
     return new Promise<ChunkReadyPayload>((resolve, reject) => {
-      this.pendingChunkRequests.set(chunkKey, { resolve, reject });
+      // 15-second timeout guard so promises never hang indefinitely
+      const timeoutId = setTimeout(() => {
+        if (this.pendingChunkRequests.has(chunkKey)) {
+          this.pendingChunkRequests.delete(chunkKey);
+          reject(new Error(`Chunk request timed out: ${chunkKey}`));
+        }
+      }, 15000);
+
+      this.pendingChunkRequests.set(chunkKey, { resolve, reject, timeoutId });
       worker.postMessage({
         type: 'PROCESS_CHUNK',
         documentId,
+        sessionId,
+        requestId,
         chunkIndex,
         text,
         startWordIndex,
@@ -337,6 +417,7 @@ export class WorkerProcessingService {
 
     // Enforce active document tracking
     this.setActiveDocument(documentId);
+    const sessionId = this.getOrCreateSession(documentId);
 
     // Prepare bounded chunks (2,000–5,000 words each)
     let chunks = options.chunks;
@@ -388,6 +469,7 @@ export class WorkerProcessingService {
         const chunkReadyMsg: ChunkReadyPayload = {
           type: 'CHUNK_READY',
           documentId,
+          sessionId,
           chunkIndex: c.chunkIndex,
           words: res.words,
           metadata: res.metadata,
@@ -404,6 +486,7 @@ export class WorkerProcessingService {
           onProgress({
             type: 'PROGRESS',
             documentId,
+            sessionId,
             completedChunks: completedCount,
             totalChunks,
             percent,
@@ -450,6 +533,7 @@ export class WorkerProcessingService {
       worker.postMessage({
         type: 'PROCESS_DOCUMENT',
         documentId,
+        sessionId,
         chunks: chunks!.map((c) => ({
           chunkIndex: c.chunkIndex,
           text: c.text,
@@ -461,6 +545,5 @@ export class WorkerProcessingService {
     });
   }
 }
-
 // Global singleton instance
 export const workerProcessingService = new WorkerProcessingService();

@@ -15,6 +15,7 @@ export interface ReaderWindowState {
   prevWord: HighlightedWordParts | null;
   nextWord: HighlightedWordParts | null;
   contextWords: HighlightedWordParts[]; // The small slice [currentIndex - contextRadius, currentIndex + contextRadius]
+  windowWords: HighlightedWordParts[]; // The active chunk words (plus adjacent cached chunks)
   totalWords: number;
   isLoading: boolean;
   isSeeking: boolean;
@@ -82,6 +83,7 @@ export function useReaderWindow({
     const end = Math.min(fallbackWords.length, currentIndex + contextRadius + 1);
     return fallbackWords.slice(start, end);
   });
+  const [windowWords, setWindowWords] = useState<HighlightedWordParts[]>(() => fallbackWords);
 
   // Reset or initialize on handle change
   useEffect(() => {
@@ -103,6 +105,7 @@ export function useReaderWindow({
         const start = Math.max(0, currentIndex - contextRadius);
         const end = Math.min(fallbackWords.length, currentIndex + contextRadius + 1);
         setContextWords(fallbackWords.slice(start, end));
+        setWindowWords(fallbackWords);
         setIsLoading(false);
         setIsSeeking(false);
         return;
@@ -257,12 +260,24 @@ export function useReaderWindow({
           }
         }
 
+        const combinedWindowWords: HighlightedWordParts[] = [];
+        if (loc.chunkIndex > 0) {
+          const prevChunkWords = chunkWordsCacheRef.current.get(loc.chunkIndex - 1);
+          if (prevChunkWords) combinedWindowWords.push(...prevChunkWords);
+        }
+        combinedWindowWords.push(...currentChunkWords);
+        const nextChunkWords = chunkWordsCacheRef.current.get(loc.chunkIndex + 1);
+        if (nextChunkWords) combinedWindowWords.push(...nextChunkWords);
+
         if (isMounted && activeGenerationRef.current === currentToken) {
           setCurrentWord(resolvedCurrent);
           setPrevWord(resolvedPrev);
           setNextWord(resolvedNext);
           if (windowList.length > 0) {
             setContextWords(windowList);
+          }
+          if (combinedWindowWords.length > 0) {
+            setWindowWords(combinedWindowWords);
           }
         }
 
@@ -339,6 +354,7 @@ export function useReaderWindow({
     prevWord,
     nextWord,
     contextWords,
+    windowWords,
     totalWords: totalWords > 0 ? totalWords : (fallbackWords.length || 1),
     isLoading,
     isSeeking,

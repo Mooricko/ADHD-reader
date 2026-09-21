@@ -7,7 +7,7 @@ import { InputHub } from './InputHub/InputHub';
 interface TextInputModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentText: string;
+  currentText?: string;
   currentTitle: string;
   onApplyText: (text: string, title?: string) => void;
   onImportDocument?: (doc: ReaderDocument) => void;
@@ -21,7 +21,7 @@ interface TextInputModalProps {
 export const TextInputModal: React.FC<TextInputModalProps> = ({
   isOpen,
   onClose,
-  currentText,
+  currentText = '',
   currentTitle,
   onApplyText,
   onImportDocument,

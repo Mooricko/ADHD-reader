@@ -25,29 +25,31 @@ export async function searchDocument(
   const maxResults = options?.maxResults ?? 50;
   const isCaseSensitive = options?.caseSensitive ?? false;
 
-  const [chunks, structure] = await Promise.all([
-    options?.startWordIndex !== undefined && options?.endWordIndex !== undefined
-      ? documentStorageService.getChunksForWordRange(documentId, options.startWordIndex, options.endWordIndex)
-      : documentStorageService.getAllChunks(documentId),
+  const [meta, structure] = await Promise.all([
+    documentStorageService.getMetadata(documentId),
     documentStorageService.getStructure(documentId),
   ]);
 
-  if (!chunks || chunks.length === 0) {
+  const totalChunks = meta?.totalChunks ?? (meta as any)?.chunkCount ?? 0;
+  if (!meta || totalChunks === 0) {
     return [];
   }
 
   const results: SearchResult[] = [];
   const searchTerm = isCaseSensitive ? trimmed : trimmed.toLowerCase();
 
-  for (const chunk of chunks) {
+  for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
     if (results.length >= maxResults) break;
+
+    const chunk = await documentStorageService.getChunk(documentId, chunkIdx);
+    if (!chunk) continue;
 
     // Word range bounds filter if requested
     if (options?.startWordIndex !== undefined && chunk.endWordIndex < options.startWordIndex) {
       continue;
     }
     if (options?.endWordIndex !== undefined && chunk.startWordIndex > options.endWordIndex) {
-      continue;
+      break;
     }
 
     const chunkText = chunk.text;

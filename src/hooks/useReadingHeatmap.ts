@@ -13,6 +13,7 @@ const STORAGE_KEY_SESSIONS = 'adhd_reading_sessions_history_v1';
 
 interface UseReadingHeatmapProps {
   words: HighlightedWordParts[];
+  totalWords?: number;
   currentIndex: number;
   isPlaying: boolean;
   wpm: number;
@@ -31,17 +32,20 @@ interface ActiveSessionData {
 
 export function useReadingHeatmap({
   words,
+  totalWords: customTotalWords,
   currentIndex,
   isPlaying,
   wpm,
   documentTitle,
   isIdle = false,
 }: UseReadingHeatmapProps) {
+  const effectiveTotalWords = customTotalWords ?? words.length;
+
   // Storage key derived from title and length to persist across reloads
   const storageKey = useMemo(() => {
     const safeTitle = (documentTitle || 'reading').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    return `adhd_heatmap_dwell_${safeTitle}_${words.length}`;
-  }, [documentTitle, words.length]);
+    return `adhd_heatmap_dwell_${safeTitle}_${effectiveTotalWords}`;
+  }, [documentTitle, effectiveTotalWords]);
 
   // Dwell times storage per word index (in milliseconds)
   const dwellTimesRef = useRef<number[]>([]);

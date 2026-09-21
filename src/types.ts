@@ -184,6 +184,7 @@ export interface DocumentMetadata {
   lastReadWordIndex: number;
   category?: string;
   totalChunks?: number;
+  chunkCount?: number;
   pageCount?: number;
   hasStructure?: boolean;
 }
@@ -237,8 +238,16 @@ export interface ReaderDocumentHandle {
     highlightStyle?: HighlightStyle
   ): Promise<HighlightedWordParts[]>;
   getAdjacentChunks(currentChunkIndex: number, radius?: number): Promise<DocumentChunk[]>;
+  getWordsSlice(
+    startIndex: number,
+    count: number,
+    highlightStyle?: HighlightStyle
+  ): Promise<HighlightedWordParts[]>;
   getWordsInRange(startWordIndex: number, endWordIndex: number): Promise<string[]>;
   getParagraphs(): Promise<string[]>;
+  getCachedChunkCount?(): number;
+  getCachedWordsChunkCount?(): number;
+  getMaxCachedChunks?(): number;
   getLocationInfo(wordIndex: number): Promise<{
     chunkIndex: number;
     wordIndexInChunk: number;

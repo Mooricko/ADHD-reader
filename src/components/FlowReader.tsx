@@ -23,8 +23,13 @@ import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { LayoutGroup } from 'motion/react';
 import { measureDevTiming } from '../utils/performanceDiagnostics';
 
+import { ReaderDocumentHandle } from '../types';
+
 interface FlowReaderProps {
   words: HighlightedWordParts[];
+  totalWords?: number;
+  handle?: ReaderDocumentHandle | null;
+  getWordsSlice?: (startIndex: number, count: number) => Promise<HighlightedWordParts[]>;
   currentIndex: number;
   onIndexChange: (index: number) => void;
   isPlaying: boolean;
@@ -50,6 +55,9 @@ interface ParagraphGroup {
 
 export const FlowReader: React.FC<FlowReaderProps> = ({
   words,
+  totalWords: customTotalWords,
+  handle: _handle,
+  getWordsSlice,
   currentIndex,
   onIndexChange,
   isPlaying,
@@ -71,6 +79,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
   const font = FONT_CONFIGS[settings.fontFamily];
   
+  const effectiveTotalWords = customTotalWords !== undefined ? customTotalWords : words.length;
+
   const activeWordRef = useRef<HTMLSpanElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const paragraphRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
@@ -84,6 +94,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const currentIndexRef = useRef(currentIndex);
   const settingsRef = useRef(settings);
   const wordsRef = useRef(words);
+  const effectiveTotalWordsRef = useRef(effectiveTotalWords);
+  const getWordsSliceRef = useRef(getWordsSlice);
   const onTogglePlayRef = useRef(onTogglePlay);
   const onIndexChangeRef = useRef(onIndexChange);
   const warmupStatusRef = useRef(warmupStatus);
@@ -94,11 +106,13 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     currentIndexRef.current = currentIndex;
     settingsRef.current = settings;
     wordsRef.current = words;
+    effectiveTotalWordsRef.current = effectiveTotalWords;
+    getWordsSliceRef.current = getWordsSlice;
     onTogglePlayRef.current = onTogglePlay;
     onIndexChangeRef.current = onIndexChange;
     warmupStatusRef.current = warmupStatus;
     onWordStepRef.current = onWordStep;
-  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
+  }, [isPlaying, currentIndex, settings, words, effectiveTotalWords, getWordsSlice, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
 
   // Group words by paragraphIndex for paragraph-level focus blur and centering
   const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
@@ -112,13 +126,14 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
 
         words.forEach((w, idx) => {
           const pIdx = w.paragraphIndex ?? 0;
+          const globalIdx = w.index !== undefined ? w.index : idx;
           if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
             if (currentGroup) {
               groups.push(currentGroup);
             }
             currentGroup = { paragraphIndex: pIdx, words: [] };
           }
-          currentGroup.words.push({ word: w, globalIndex: idx });
+          currentGroup.words.push({ word: w, globalIndex: globalIdx });
         });
 
         if (currentGroup) {
@@ -135,7 +150,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   }, [words]);
 
   // Determine current active paragraph index from currentIndex
-  const activeWord = words[currentIndex];
+  const activeWord = words.find(w => w.index === currentIndex) || words[currentIndex] || words[0];
   const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
 
   const currentWordAnalysis = useMemo(() => {
@@ -184,6 +199,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       speechNarrator.speakFromIndex({
         words: wordsRef.current,
         startIndex: currentIndexRef.current,
+        totalWords: effectiveTotalWordsRef.current,
+        getWordsSlice: getWordsSliceRef.current,
         settings: settingsRef.current,
         getCurrentWpm: () => {
           if (warmupStatusRef.current?.isWarmingUp) {
@@ -211,21 +228,22 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       if (!isPlayingRef.current) return;
 
       const currIdx = currentIndexRef.current;
-      const allWords = wordsRef.current;
+      const totalCount = effectiveTotalWordsRef.current;
 
-      if (currIdx >= allWords.length - 1) {
+      if (currIdx >= totalCount - 1) {
         onTogglePlayRef.current();
         return;
       }
 
       onWordStepRef.current?.();
-      const nextIdx = currIdx + 1;
+      const nextIdx = Math.min(totalCount - 1, currIdx + 1);
       onIndexChangeRef.current(nextIdx);
 
-      const currentWordObj = allWords[nextIdx];
+      const allWords = wordsRef.current;
+      const currentWordObj = allWords.find(w => w.index === nextIdx) || allWords[nextIdx];
       
       // Audio metronome tick synchronization
-      if (settingsRef.current.metronomeSound) {
+      if (settingsRef.current.metronomeSound && currentWordObj) {
         metronome.playTick(settingsRef.current.metronomeVolume, currentWordObj?.hasSentenceEnd);
       }
 
@@ -233,12 +251,14 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         ? warmupStatusRef.current.currentWpm
         : settingsRef.current.wpm;
 
-      const delay = calculateWordDelayMs(
-        currentWordObj,
-        effectiveWpm,
-        settingsRef.current.smartPunctuationPause,
-        settingsRef.current.smartPace
-      );
+      const delay = currentWordObj
+        ? calculateWordDelayMs(
+            currentWordObj,
+            effectiveWpm,
+            settingsRef.current.smartPunctuationPause,
+            settingsRef.current.smartPace
+          )
+        : (60 / effectiveWpm) * 1000;
 
       timerRef.current = setTimeout(scheduleNextWord, delay);
     };
@@ -247,7 +267,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       ? warmupStatusRef.current.currentWpm
       : settings.wpm;
 
-    const currentWordObj = words[currentIndexRef.current] || words[0];
+    const currentWordObj = words.find(w => w.index === currentIndexRef.current) || words[currentIndexRef.current] || words[0];
     const initialDelay = currentWordObj
       ? calculateWordDelayMs(currentWordObj, effectiveWpm, settings.smartPunctuationPause, settings.smartPace)
       : (60 / effectiveWpm) * 1000;
@@ -272,11 +292,12 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     settings.smartPunctuationPause,
     settings.smartPace,
     settings.warmupMode,
-    words
+    words,
+    effectiveTotalWords
   ]);
 
-  const progressPercent = words.length > 0 ? Math.round(((currentIndex + 1) / words.length) * 100) : 0;
-  const wordsRemaining = Math.max(0, words.length - 1 - currentIndex);
+  const progressPercent = effectiveTotalWords > 0 ? Math.round(((currentIndex + 1) / effectiveTotalWords) * 100) : 0;
+  const wordsRemaining = Math.max(0, effectiveTotalWords - 1 - currentIndex);
   const secondsRemaining = Math.round((wordsRemaining / Math.max(1, settings.wpm)) * 60);
   const remainingMins = Math.floor(secondsRemaining / 60);
   const remainingSecs = secondsRemaining % 60;
@@ -298,7 +319,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       >
         <div className="flex items-center gap-2">
           <span className={`px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} font-mono font-medium ${theme.textPrimary}`}>
-            {currentIndex + 1} <span className={theme.textMuted}>/ {words.length}</span>
+            {currentIndex + 1} <span className={theme.textMuted}>/ {effectiveTotalWords}</span>
           </span>
           <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textMuted}`}>
             <Clock className="w-3.5 h-3.5" />
@@ -497,6 +518,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
           <div className="pb-1 border-b border-white/5">
             <ReadingHeatmapProgress
               words={words}
+              totalWords={effectiveTotalWords}
               currentIndex={currentIndex}
               onIndexChange={onIndexChange}
               heatmapData={heatmapData}

@@ -19,6 +19,8 @@ export const DEFAULT_ACTIVE_CACHE_CHUNKS = 3; // Window: [current - 1, current, 
 export interface ProcessChunkPayload {
   type: 'PROCESS_CHUNK';
   documentId: string;
+  sessionId?: string;
+  requestId?: string;
   chunkIndex: number;
   text: string;
   startWordIndex: number;
@@ -32,6 +34,8 @@ export interface ProcessChunkPayload {
 export interface ProcessDocumentPayload {
   type: 'PROCESS_DOCUMENT';
   documentId: string;
+  sessionId?: string;
+  requestId?: string;
   chunks: Array<{
     chunkIndex: number;
     text: string;
@@ -47,6 +51,7 @@ export interface ProcessDocumentPayload {
 export interface CancelDocumentPayload {
   type: 'CANCEL_DOCUMENT';
   documentId: string;
+  sessionId?: string;
 }
 
 export type MainToWorkerMessage =
@@ -70,6 +75,8 @@ export interface ChunkReadyMetadata {
 export interface ChunkReadyPayload {
   type: 'CHUNK_READY';
   documentId: string;
+  sessionId?: string;
+  requestId?: string;
   chunkIndex: number;
   words: HighlightedWordParts[];
   metadata: ChunkReadyMetadata;
@@ -78,6 +85,7 @@ export interface ChunkReadyPayload {
 export interface ProgressPayload {
   type: 'PROGRESS';
   documentId: string;
+  sessionId?: string;
   completedChunks: number;
   totalChunks: number;
   percent: number; // 0 to 100
@@ -88,6 +96,7 @@ export interface ProgressPayload {
 export interface DocumentCompletePayload {
   type: 'DOCUMENT_COMPLETE';
   documentId: string;
+  sessionId?: string;
   totalWords: number;
   totalChunks: number;
   durationMs: number;
@@ -96,6 +105,8 @@ export interface DocumentCompletePayload {
 export interface WorkerErrorPayload {
   type: 'ERROR';
   documentId: string;
+  sessionId?: string;
+  requestId?: string;
   chunkIndex?: number;
   error: string;
   recoverable: boolean;
@@ -104,6 +115,7 @@ export interface WorkerErrorPayload {
 export interface CancelledPayload {
   type: 'CANCELLED';
   documentId: string;
+  sessionId?: string;
 }
 
 export type WorkerToMainMessage =

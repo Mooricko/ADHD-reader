@@ -343,6 +343,8 @@ class SpeechNarrationService {
     onFinished,
     isPlayingCheck,
     getCurrentWpm,
+    getWordsSlice,
+    totalWords,
   }: {
     words: HighlightedWordParts[];
     startIndex: number;
@@ -351,8 +353,12 @@ class SpeechNarrationService {
     onFinished: FinishedCallback;
     isPlayingCheck: () => boolean;
     getCurrentWpm?: () => number;
+    getWordsSlice?: (startIndex: number, count: number) => Promise<HighlightedWordParts[]>;
+    totalWords?: number;
   }): void {
-    if (startIndex >= words.length) {
+    const effectiveTotalWords = totalWords ?? (words.length > 0 && typeof words[words.length - 1].index === 'number' ? words[words.length - 1].index! + 1 : words.length);
+
+    if (words.length === 0 || startIndex >= effectiveTotalWords) {
       onFinished();
       return;
     }
@@ -377,6 +383,8 @@ class SpeechNarrationService {
         isPlayingCheck,
         utteranceId,
         getCurrentWpm,
+        getWordsSlice,
+        totalWords: effectiveTotalWords,
       });
       return;
     }
@@ -384,22 +392,32 @@ class SpeechNarrationService {
     const synth = this.getSynth();
     if (!synth || !this.isSupported()) return;
 
+    // Locate matching start position within the words slice
+    let localStartIndex = 0;
+    if (words.length > 0 && typeof words[0].index === 'number') {
+      const matchPos = words.findIndex((w) => w.index === startIndex);
+      localStartIndex = matchPos !== -1 ? matchPos : Math.max(0, Math.min(words.length - 1, startIndex));
+    } else {
+      localStartIndex = Math.max(0, Math.min(words.length - 1, startIndex));
+    }
+
     // 1. Determine a natural chunk:
     // When warming up, use smaller, naturally-bounded chunks (5-8 words or clause pauses)
     // so speech acceleration matches visual warm-up ramp between phrases without audio clipping.
-    let endIndex = startIndex;
+    let localEndIndex = localStartIndex;
     const maxChunkSize = isWarmingUp ? 8 : 25;
-    while (endIndex < words.length - 1 && (endIndex - startIndex) < maxChunkSize) {
-      const w = words[endIndex];
+    while (localEndIndex < words.length - 1 && (localEndIndex - localStartIndex) < maxChunkSize) {
+      const w = words[localEndIndex];
       if (w.hasSentenceEnd || w.hasParagraphBreak || (isWarmingUp && (w.hasClausePause || w.original.endsWith(',')))) {
         break;
       }
-      endIndex++;
+      localEndIndex++;
     }
 
     this.activeChunkStartIndex = startIndex;
-    this.activeChunkEndIndex = endIndex;
-    this.activeChunkWords = words.slice(startIndex, endIndex + 1);
+    this.activeChunkWords = words.slice(localStartIndex, localEndIndex + 1);
+    const lastWord = this.activeChunkWords[this.activeChunkWords.length - 1];
+    this.activeChunkEndIndex = typeof lastWord?.index === 'number' ? lastWord.index : startIndex + this.activeChunkWords.length - 1;
 
     // 2. Build continuous text and character offset map
     let accumulatedOffset = 0;
@@ -413,11 +431,12 @@ class SpeechNarrationService {
 
       const wordStart = accumulatedOffset;
       const wordEnd = accumulatedOffset + wordStr.length;
+      const globalWordIndex = typeof wordObj.index === 'number' ? wordObj.index : startIndex + i;
 
       this.activeCharOffsets.push({
         start: wordStart,
         end: wordEnd,
-        index: startIndex + i,
+        index: globalWordIndex,
       });
 
       accumulatedOffset += wordStr.length + 1; // + 1 for space
@@ -425,16 +444,39 @@ class SpeechNarrationService {
 
     const chunkText = textPieces.join(' ');
     if (!chunkText.trim()) {
-      if (endIndex + 1 < words.length && isPlayingCheck()) {
-        this.speakFromIndex({
-          words,
-          startIndex: endIndex + 1,
-          settings,
-          onWordSync,
-          onFinished,
-          isPlayingCheck,
-          getCurrentWpm,
-        });
+      const nextStart = this.activeChunkEndIndex + 1;
+      if (nextStart < effectiveTotalWords && isPlayingCheck()) {
+        if (getWordsSlice) {
+          getWordsSlice(nextStart, 30).then((nextWords) => {
+            if (nextWords.length > 0 && isPlayingCheck() && this.isSpeaking) {
+              this.speakFromIndex({
+                words: nextWords,
+                startIndex: nextStart,
+                settings,
+                onWordSync,
+                onFinished,
+                isPlayingCheck,
+                getCurrentWpm,
+                getWordsSlice,
+                totalWords: effectiveTotalWords,
+              });
+            } else {
+              onFinished();
+            }
+          }).catch(() => onFinished());
+        } else {
+          this.speakFromIndex({
+            words,
+            startIndex: nextStart,
+            settings,
+            onWordSync,
+            onFinished,
+            isPlayingCheck,
+            getCurrentWpm,
+            getWordsSlice,
+            totalWords: effectiveTotalWords,
+          });
+        }
       } else {
         onFinished();
       }
@@ -519,16 +561,44 @@ class SpeechNarrationService {
       }
 
       const nextIndex = this.activeChunkEndIndex + 1;
-      if (nextIndex < words.length) {
-        this.speakFromIndex({
-          words,
-          startIndex: nextIndex,
-          settings,
-          onWordSync,
-          onFinished,
-          isPlayingCheck,
-          getCurrentWpm,
-        });
+      if (nextIndex < effectiveTotalWords) {
+        if (getWordsSlice) {
+          getWordsSlice(nextIndex, 30).then((nextSlice) => {
+            if (nextSlice.length > 0 && isPlayingCheck() && this.isSpeaking) {
+              this.speakFromIndex({
+                words: nextSlice,
+                startIndex: nextIndex,
+                settings,
+                onWordSync,
+                onFinished,
+                isPlayingCheck,
+                getCurrentWpm,
+                getWordsSlice,
+                totalWords: effectiveTotalWords,
+              });
+            } else {
+              this.isSpeaking = false;
+              this.currentUtterance = null;
+              onFinished();
+            }
+          }).catch(() => {
+            this.isSpeaking = false;
+            this.currentUtterance = null;
+            onFinished();
+          });
+        } else {
+          this.speakFromIndex({
+            words,
+            startIndex: nextIndex,
+            settings,
+            onWordSync,
+            onFinished,
+            isPlayingCheck,
+            getCurrentWpm,
+            getWordsSlice,
+            totalWords: effectiveTotalWords,
+          });
+        }
       } else {
         this.isSpeaking = false;
         this.currentUtterance = null;
@@ -559,9 +629,9 @@ class SpeechNarrationService {
 
     // 7. Setup fallback timer in case browser does not support onboundary events
     this.scheduleFallbackWordPacing({
-      words,
+      words: this.activeChunkWords,
       chunkStartIndex: startIndex,
-      chunkEndIndex: endIndex,
+      chunkEndIndex: this.activeChunkEndIndex,
       effectiveWpm: currentWpm,
       settings,
       onWordSync,
@@ -582,6 +652,8 @@ class SpeechNarrationService {
     isPlayingCheck,
     utteranceId,
     getCurrentWpm,
+    getWordsSlice,
+    totalWords,
   }: {
     words: HighlightedWordParts[];
     index: number;
@@ -591,17 +663,35 @@ class SpeechNarrationService {
     isPlayingCheck: () => boolean;
     utteranceId: number;
     getCurrentWpm?: () => number;
+    getWordsSlice?: (startIndex: number, count: number) => Promise<HighlightedWordParts[]>;
+    totalWords?: number;
   }): void {
     if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
 
-    if (index >= words.length) {
+    const effectiveTotalWords = totalWords ?? words.length;
+    if (index >= effectiveTotalWords) {
       this.isSpeaking = false;
       onFinished();
       return;
     }
 
-    const currentWord = words[index];
-    onWordSync(index);
+    let localIdx = 0;
+    if (words.length > 0 && typeof words[0].index === 'number') {
+      const match = words.findIndex((w) => w.index === index);
+      localIdx = match !== -1 ? match : Math.max(0, Math.min(words.length - 1, index));
+    } else {
+      localIdx = Math.max(0, Math.min(words.length - 1, index));
+    }
+
+    const currentWord = words[localIdx];
+    if (!currentWord) {
+      this.isSpeaking = false;
+      onFinished();
+      return;
+    }
+
+    const currentGlobalIdx = typeof currentWord.index === 'number' ? currentWord.index : index;
+    onWordSync(currentGlobalIdx);
 
     const effectiveWpm = getCurrentWpm ? getCurrentWpm() : settings.wpm;
 
@@ -622,16 +712,50 @@ class SpeechNarrationService {
 
     this.synthTimer = setTimeout(() => {
       if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
-      this.playPersianSynthWordByWord({
-        words,
-        index: index + 1,
-        settings,
-        onWordSync,
-        onFinished,
-        isPlayingCheck,
-        utteranceId,
-        getCurrentWpm,
-      });
+      const nextIdx = index + 1;
+      if (nextIdx >= effectiveTotalWords) {
+        this.isSpeaking = false;
+        onFinished();
+        return;
+      }
+
+      if (getWordsSlice && localIdx >= words.length - 2) {
+        getWordsSlice(nextIdx, 20).then((slice) => {
+          if (slice.length > 0 && isPlayingCheck() && this.activeUtteranceId === utteranceId) {
+            this.playPersianSynthWordByWord({
+              words: slice,
+              index: nextIdx,
+              settings,
+              onWordSync,
+              onFinished,
+              isPlayingCheck,
+              utteranceId,
+              getCurrentWpm,
+              getWordsSlice,
+              totalWords: effectiveTotalWords,
+            });
+          } else {
+            this.isSpeaking = false;
+            onFinished();
+          }
+        }).catch(() => {
+          this.isSpeaking = false;
+          onFinished();
+        });
+      } else {
+        this.playPersianSynthWordByWord({
+          words,
+          index: nextIdx,
+          settings,
+          onWordSync,
+          onFinished,
+          isPlayingCheck,
+          utteranceId,
+          getCurrentWpm,
+          getWordsSlice,
+          totalWords: effectiveTotalWords,
+        });
+      }
     }, delay);
   }
 

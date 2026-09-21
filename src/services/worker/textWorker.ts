@@ -8,8 +8,20 @@
 import { MainToWorkerMessage, WorkerToMainMessage } from './workerProtocol';
 import { processChunkPure } from './chunkProcessor';
 
-// Bounded set of cancelled document IDs to prevent processing cancelled jobs
-const cancelledDocumentIds = new Set<string>();
+// Bounded tracking of active session IDs and cancelled session tokens
+const activeDocumentSessions = new Map<string, string>();
+const cancelledSessionIds = new Set<string>();
+
+function isSessionCancelled(documentId: string, sessionId?: string): boolean {
+  if (sessionId && cancelledSessionIds.has(sessionId)) {
+    return true;
+  }
+  const currentActiveSession = activeDocumentSessions.get(documentId);
+  if (sessionId && currentActiveSession && sessionId !== currentActiveSession) {
+    return true; // Superseded by a newer session
+  }
+  return false;
+}
 
 // Handle incoming messages from the Main UI Thread
 self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
@@ -18,24 +30,36 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
 
   switch (msg.type) {
     case 'CANCEL_DOCUMENT': {
-      cancelledDocumentIds.add(msg.documentId);
-      // Clean up bounded set to max 200 IDs
-      if (cancelledDocumentIds.size > 200) {
-        const first = cancelledDocumentIds.values().next().value;
-        if (first) cancelledDocumentIds.delete(first);
+      const { documentId, sessionId } = msg;
+      const targetSession = sessionId || activeDocumentSessions.get(documentId);
+      if (targetSession) {
+        cancelledSessionIds.add(targetSession);
+        // Clean up bounded set to max 500 IDs
+        if (cancelledSessionIds.size > 500) {
+          const first = cancelledSessionIds.values().next().value;
+          if (first) cancelledSessionIds.delete(first);
+        }
       }
+      activeDocumentSessions.delete(documentId);
+
       const response: WorkerToMainMessage = {
         type: 'CANCELLED',
-        documentId: msg.documentId,
+        documentId,
+        sessionId: targetSession,
       };
       self.postMessage(response);
       break;
     }
 
     case 'PROCESS_CHUNK': {
-      const { documentId, chunkIndex, text, startWordIndex, highlightStyle, options } = msg;
+      const { documentId, sessionId, requestId, chunkIndex, text, startWordIndex, highlightStyle, options } = msg;
 
-      if (cancelledDocumentIds.has(documentId)) {
+      // Register or update active session
+      if (sessionId) {
+        activeDocumentSessions.set(documentId, sessionId);
+      }
+
+      if (isSessionCancelled(documentId, sessionId)) {
         return;
       }
 
@@ -49,13 +73,15 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
           options,
         });
 
-        if (cancelledDocumentIds.has(documentId)) {
+        if (isSessionCancelled(documentId, sessionId)) {
           return;
         }
 
         const chunkReadyMsg: WorkerToMainMessage = {
           type: 'CHUNK_READY',
           documentId,
+          sessionId,
+          requestId,
           chunkIndex,
           words: result.words,
           metadata: result.metadata,
@@ -65,6 +91,8 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
         const errorMsg: WorkerToMainMessage = {
           type: 'ERROR',
           documentId,
+          sessionId,
+          requestId,
           chunkIndex,
           error: err?.message || 'Error processing chunk in worker',
           recoverable: true,
@@ -75,9 +103,13 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
     }
 
     case 'PROCESS_DOCUMENT': {
-      const { documentId, chunks, highlightStyle, options } = msg;
+      const { documentId, sessionId, chunks, highlightStyle, options } = msg;
 
-      if (cancelledDocumentIds.has(documentId)) {
+      if (sessionId) {
+        activeDocumentSessions.set(documentId, sessionId);
+      }
+
+      if (isSessionCancelled(documentId, sessionId)) {
         return;
       }
 
@@ -88,10 +120,11 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
       try {
         for (let i = 0; i < totalChunks; i++) {
           // Check cancellation before every chunk
-          if (cancelledDocumentIds.has(documentId)) {
+          if (isSessionCancelled(documentId, sessionId)) {
             const cancelResp: WorkerToMainMessage = {
               type: 'CANCELLED',
               documentId,
+              sessionId,
             };
             self.postMessage(cancelResp);
             return;
@@ -108,7 +141,7 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
           });
 
           // Check cancellation after processing chunk
-          if (cancelledDocumentIds.has(documentId)) {
+          if (isSessionCancelled(documentId, sessionId)) {
             return;
           }
 
@@ -118,6 +151,7 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
           const chunkReadyMsg: WorkerToMainMessage = {
             type: 'CHUNK_READY',
             documentId,
+            sessionId,
             chunkIndex: c.chunkIndex,
             words: result.words,
             metadata: result.metadata,
@@ -130,6 +164,7 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
           const progressMsg: WorkerToMainMessage = {
             type: 'PROGRESS',
             documentId,
+            sessionId,
             completedChunks: completedCount,
             totalChunks,
             percent,
@@ -145,6 +180,7 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
         const completeMsg: WorkerToMainMessage = {
           type: 'DOCUMENT_COMPLETE',
           documentId,
+          sessionId,
           totalWords,
           totalChunks,
           durationMs,
@@ -154,6 +190,7 @@ self.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
         const errorMsg: WorkerToMainMessage = {
           type: 'ERROR',
           documentId,
+          sessionId,
           error: err?.message || 'Error processing document in worker',
           recoverable: true,
         };

@@ -34,8 +34,13 @@ import { MetallicButton } from './MetallicButton';
 import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { AutoPauseReason } from '../hooks/useSmartAutoPause';
 
+import { ReaderDocumentHandle } from '../types';
+
 interface RSVPReaderProps {
   words: HighlightedWordParts[];
+  totalWords?: number;
+  handle?: ReaderDocumentHandle | null;
+  getWordsSlice?: (startIndex: number, count: number) => Promise<HighlightedWordParts[]>;
   currentIndex: number;
   onIndexChange: (index: number) => void;
   isPlaying: boolean;
@@ -58,6 +63,9 @@ interface RSVPReaderProps {
 
 export const RSVPReader: React.FC<RSVPReaderProps> = ({
   words,
+  totalWords: customTotalWords,
+  handle: _handle,
+  getWordsSlice,
   currentIndex,
   onIndexChange,
   isPlaying,
@@ -81,12 +89,16 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
   const highlight = HIGHLIGHT_COLORS[settings.highlightColor];
   const font = FONT_CONFIGS[settings.fontFamily];
 
+  const effectiveTotalWords = customTotalWords !== undefined ? customTotalWords : words.length;
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [hasFinished, setHasFinished] = useState(false);
   const isPlayingRef = useRef(isPlaying);
   const currentIndexRef = useRef(currentIndex);
   const settingsRef = useRef(settings);
   const wordsRef = useRef(words);
+  const effectiveTotalWordsRef = useRef(effectiveTotalWords);
+  const getWordsSliceRef = useRef(getWordsSlice);
   const onTogglePlayRef = useRef(onTogglePlay);
   const onIndexChangeRef = useRef(onIndexChange);
   const warmupStatusRef = useRef(warmupStatus);
@@ -98,11 +110,13 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     currentIndexRef.current = currentIndex;
     settingsRef.current = settings;
     wordsRef.current = words;
+    effectiveTotalWordsRef.current = effectiveTotalWords;
+    getWordsSliceRef.current = getWordsSlice;
     onTogglePlayRef.current = onTogglePlay;
     onIndexChangeRef.current = onIndexChange;
     warmupStatusRef.current = warmupStatus;
     onWordStepRef.current = onWordStep;
-  }, [isPlaying, currentIndex, settings, words, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
+  }, [isPlaying, currentIndex, settings, words, effectiveTotalWords, getWordsSlice, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
 
   // Main playback loop (Web Speech API Narration OR Visual RSVP Timer)
   useEffect(() => {
@@ -125,6 +139,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       speechNarrator.speakFromIndex({
         words: wordsRef.current,
         startIndex: currentIndexRef.current,
+        totalWords: effectiveTotalWordsRef.current,
+        getWordsSlice: getWordsSliceRef.current,
         settings: settingsRef.current,
         getCurrentWpm: () => {
           if (warmupStatusRef.current?.isWarmingUp) {
@@ -136,7 +152,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           onWordStepRef.current?.();
           onIndexChangeRef.current(syncedIdx);
           if (settingsRef.current.metronomeSound) {
-            const currentW = wordsRef.current[syncedIdx];
+            const currentW = wordsRef.current.find(w => w.index === syncedIdx) || wordsRef.current[syncedIdx];
             metronome.playTick(settingsRef.current.metronomeVolume, currentW?.hasSentenceEnd);
           }
         },
@@ -163,9 +179,9 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       if (!isPlayingRef.current) return;
 
       const currIdx = currentIndexRef.current;
-      const allWords = wordsRef.current;
+      const totalCount = effectiveTotalWordsRef.current;
 
-      if (currIdx >= allWords.length - 1) {
+      if (currIdx >= totalCount - 1) {
         // Reached the end of text!
         onTogglePlayRef.current();
         setHasFinished(true);
@@ -182,13 +198,15 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       onWordStepRef.current?.();
 
       // Always advance word-by-word so the vertical reel swipes to each word smoothly
-      const nextIdx = Math.min(allWords.length - 1, currIdx + 1);
+      const nextIdx = Math.min(totalCount - 1, currIdx + 1);
       onIndexChangeRef.current(nextIdx);
 
+      const allWords = wordsRef.current;
+      const nextWord = allWords.find(w => w.index === nextIdx) || allWords[nextIdx];
+
       // Play subtle metronome tick if enabled
-      if (settingsRef.current.metronomeSound) {
-        const nextWord = allWords[nextIdx];
-        metronome.playTick(settingsRef.current.metronomeVolume, nextWord?.hasSentenceEnd);
+      if (settingsRef.current.metronomeSound && nextWord) {
+        metronome.playTick(settingsRef.current.metronomeVolume, nextWord.hasSentenceEnd);
       }
 
       // Determine effective speed (warm-up speed or configured target)
@@ -197,12 +215,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         : settingsRef.current.wpm;
 
       // Calculate duration for this word with Smart Pace and natural punctuation pauses
-      let wordDelay = calculateWordDelayMs(
-        allWords[nextIdx],
-        currentEffectiveWpm,
-        settingsRef.current.smartPunctuationPause,
-        settingsRef.current.smartPace
-      );
+      let wordDelay = nextWord
+        ? calculateWordDelayMs(
+            nextWord,
+            currentEffectiveWpm,
+            settingsRef.current.smartPunctuationPause,
+            settingsRef.current.smartPace
+          )
+        : (60 / currentEffectiveWpm) * 1000;
       if (wordDelay <= 0) {
         wordDelay = (60 / currentEffectiveWpm) * 1000;
       }
@@ -215,13 +235,15 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       ? warmupStatusRef.current.currentWpm
       : settings.wpm;
 
-    const currentWord = words[currentIndexRef.current] || words[0];
-    let initialDelay = calculateWordDelayMs(
-      currentWord, 
-      currentEffectiveWpm, 
-      settings.smartPunctuationPause,
-      settings.smartPace
-    );
+    const currentWord = words.find(w => w.index === currentIndexRef.current) || words[currentIndexRef.current] || words[0];
+    let initialDelay = currentWord
+      ? calculateWordDelayMs(
+          currentWord, 
+          currentEffectiveWpm, 
+          settings.smartPunctuationPause,
+          settings.smartPace
+        )
+      : (60 / currentEffectiveWpm) * 1000;
     if (initialDelay <= 0) {
       initialDelay = (60 / currentEffectiveWpm) * 1000;
     }
@@ -252,13 +274,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     settings.warmupMode,
     settings.metronomeSound, 
     settings.metronomeVolume, 
-    words
+    words,
+    effectiveTotalWords
   ]);
 
   // Handle manual jumps
   const handleJump = useCallback((offset: number) => {
     setHasFinished(false);
-    const newIdx = Math.max(0, Math.min(words.length - 1, currentIndex + offset));
+    const newIdx = Math.max(0, Math.min(effectiveTotalWords - 1, currentIndex + offset));
     onIndexChange(newIdx);
 
     if (settings.speechNarration && isPlaying) {
@@ -266,6 +289,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       speechNarrator.speakFromIndex({
         words: wordsRef.current,
         startIndex: newIdx,
+        totalWords: effectiveTotalWordsRef.current,
+        getWordsSlice: getWordsSliceRef.current,
         settings: settingsRef.current,
         getCurrentWpm: () => {
           if (warmupStatusRef.current?.isWarmingUp) {
@@ -277,7 +302,8 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           onWordStepRef.current?.();
           onIndexChange(syncedIdx);
           if (settingsRef.current.metronomeSound) {
-            metronome.playTick(settingsRef.current.metronomeVolume, wordsRef.current[syncedIdx]?.hasSentenceEnd);
+            const currentW = wordsRef.current.find(w => w.index === syncedIdx) || wordsRef.current[syncedIdx];
+            metronome.playTick(settingsRef.current.metronomeVolume, currentW?.hasSentenceEnd);
           }
         },
         onFinished: () => {
@@ -293,7 +319,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         isPlayingCheck: () => isPlayingRef.current,
       });
     }
-  }, [currentIndex, words.length, onIndexChange, settings.speechNarration, isPlaying, onTogglePlay]);
+  }, [currentIndex, effectiveTotalWords, onIndexChange, settings.speechNarration, isPlaying, onTogglePlay]);
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
@@ -305,11 +331,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       speechNarrator.speakFromIndex({
         words: wordsRef.current,
         startIndex: val,
+        totalWords: effectiveTotalWordsRef.current,
+        getWordsSlice: getWordsSliceRef.current,
         settings: settingsRef.current,
         onWordSync: (syncedIdx) => {
           onIndexChange(syncedIdx);
           if (settingsRef.current.metronomeSound) {
-            metronome.playTick(settingsRef.current.metronomeVolume, wordsRef.current[syncedIdx]?.hasSentenceEnd);
+            const currentW = wordsRef.current.find(w => w.index === syncedIdx) || wordsRef.current[syncedIdx];
+            metronome.playTick(settingsRef.current.metronomeVolume, currentW?.hasSentenceEnd);
           }
         },
         onFinished: () => {
@@ -327,21 +356,48 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     }
   };
 
-  const currentWord = words[currentIndex] || {
-    original: '',
-    prefixPunct: '',
-    beforeHighlight: '',
-    highlightedText: '',
-    afterHighlight: '',
-    suffixPunct: '',
-    hasSentenceEnd: false,
-    hasClausePause: false,
-    hasParagraphBreak: false,
-    index: 0,
-  };
+  const currentWord = useMemo(() => {
+    if (!words || words.length === 0) {
+      return {
+        original: '',
+        prefixPunct: '',
+        beforeHighlight: '',
+        highlightedText: '',
+        afterHighlight: '',
+        suffixPunct: '',
+        hasSentenceEnd: false,
+        hasClausePause: false,
+        hasParagraphBreak: false,
+        index: currentIndex,
+      };
+    }
+    const found = words.find((w) => w.index === currentIndex);
+    if (found) return found;
+    if (words[currentIndex] && (words[currentIndex].index === undefined || words[currentIndex].index === currentIndex)) {
+      return words[currentIndex];
+    }
+    return words[0];
+  }, [words, currentIndex]);
 
-  const prevWord = currentIndex > 0 ? words[currentIndex - 1] : null;
-  const nextWord = currentIndex < words.length - 1 ? words[currentIndex + 1] : null;
+  const prevWord = useMemo(() => {
+    if (currentIndex <= 0) return null;
+    const found = words.find((w) => w.index === currentIndex - 1);
+    if (found) return found;
+    if (words[currentIndex - 1] && (words[currentIndex - 1].index === undefined || words[currentIndex - 1].index === currentIndex - 1)) {
+      return words[currentIndex - 1];
+    }
+    return null;
+  }, [words, currentIndex]);
+
+  const nextWord = useMemo(() => {
+    if (currentIndex >= effectiveTotalWords - 1) return null;
+    const found = words.find((w) => w.index === currentIndex + 1);
+    if (found) return found;
+    if (words[currentIndex + 1] && (words[currentIndex + 1].index === undefined || words[currentIndex + 1].index === currentIndex + 1)) {
+      return words[currentIndex + 1];
+    }
+    return null;
+  }, [words, currentIndex, effectiveTotalWords]);
 
   const currentWordAnalysis = useMemo(() => {
     if (!settings.smartPace || !words[currentIndex]) return null;
@@ -353,11 +409,16 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     return precalculateDriftOffsets(words, settings.driftIntensity, settings.driftAnimation);
   }, [words, settings.driftIntensity, settings.driftAnimation]);
 
-  const currentDriftOffset = settings.driftAnimation ? (driftOffsets[currentIndex] ?? 0) : 0;
+  const currentDriftOffset = useMemo(() => {
+    if (!settings.driftAnimation) return 0;
+    const localIdx = words.findIndex((w) => w.index === currentIndex);
+    const targetIdx = localIdx !== -1 ? localIdx : currentIndex;
+    return driftOffsets[targetIdx] ?? 0;
+  }, [settings.driftAnimation, driftOffsets, words, currentIndex]);
 
   // Calculate progress & remaining time
-  const progressPercent = words.length > 0 ? Math.round(((currentIndex + 1) / words.length) * 100) : 0;
-  const wordsRemaining = Math.max(0, words.length - 1 - currentIndex);
+  const progressPercent = effectiveTotalWords > 0 ? Math.round(((currentIndex + 1) / effectiveTotalWords) * 100) : 0;
+  const wordsRemaining = Math.max(0, effectiveTotalWords - 1 - currentIndex);
   const secondsRemaining = Math.round((wordsRemaining / Math.max(1, settings.wpm)) * 60);
   const remainingMins = Math.floor(secondsRemaining / 60);
   const remainingSecs = secondsRemaining % 60;
@@ -373,7 +434,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
       >
         <div className="flex items-center gap-2">
           <span className={`px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} font-mono font-medium ${theme.textPrimary}`}>
-            {currentIndex + 1} <span className={theme.textMuted}>/ {words.length}</span>
+            {currentIndex + 1} <span className={theme.textMuted}>/ {effectiveTotalWords}</span>
           </span>
           <span className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-md border ${theme.borderClass} ${theme.cardBgClass} ${theme.textMuted}`}>
             <Clock className="w-3.5 h-3.5" />
@@ -597,7 +658,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               Reading Completed!
             </h2>
             <p className={`text-sm ${theme.textMuted} max-w-sm mb-6`}>
-              You read <span className="font-semibold text-slate-200">{words.length} words</span> at{' '}
+              You read <span className="font-semibold text-slate-200">{effectiveTotalWords} words</span> at{' '}
               <span className="font-semibold text-slate-200">{settings.wpm} WPM</span>.
             </p>
             <button
@@ -718,6 +779,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
           {settings.showHeatmapProgress !== false && heatmapData ? (
             <ReadingHeatmapProgress
               words={words}
+              totalWords={effectiveTotalWords}
               currentIndex={currentIndex}
               onIndexChange={onIndexChange}
               heatmapData={heatmapData}
@@ -731,7 +793,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs font-mono font-medium">
                 <span className={theme.textMuted}>
-                  Word {currentIndex + 1} of {words.length}
+                  Word {currentIndex + 1} of {effectiveTotalWords}
                 </span>
                 <span className={theme.textPrimary}>
                   {progressPercent}%
@@ -743,7 +805,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
                   id="reading-progress-slider"
                   type="range"
                   min="0"
-                  max={Math.max(0, words.length - 1)}
+                  max={Math.max(0, effectiveTotalWords - 1)}
                   value={currentIndex}
                   onChange={handleSeek}
                   aria-label="Reading progress"
@@ -806,7 +868,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               onTogglePlay();
             }}
             sheenColor={highlight.hex}
-            title={isPlaying ? 'Pause reading (Space)' : (currentIndex >= words.length - 1 ? 'Read Again (Space)' : 'Play reading (Space)')}
+            title={isPlaying ? 'Pause reading (Space)' : (currentIndex >= effectiveTotalWords - 1 ? 'Read Again (Space)' : 'Play reading (Space)')}
           />
 
 

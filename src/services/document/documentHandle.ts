@@ -168,6 +168,34 @@ export class DocumentHandle implements ReaderDocumentHandle {
   }
 
   /**
+   * Retrieves an array of HighlightedWordParts across chunk boundaries without loading the full document.
+   */
+  public async getWordsSlice(
+    startIndex: number,
+    count: number,
+    highlightStyle: HighlightStyle = 'middle-two'
+  ): Promise<HighlightedWordParts[]> {
+    if (count <= 0) return [];
+    const endIndex = startIndex + count - 1;
+    const chunks = await documentStorageService.getChunksForWordRange(
+      this.id,
+      startIndex,
+      endIndex
+    );
+
+    const result: HighlightedWordParts[] = [];
+    for (const chunk of chunks) {
+      const chunkWords = await this.getProcessedWordsForChunk(chunk.chunkIndex, highlightStyle);
+      for (const w of chunkWords) {
+        if (w.index >= startIndex && w.index <= endIndex) {
+          result.push(w);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
    * Retrieves an array of individual words within the global word range [startWordIndex, endWordIndex].
    */
   public async getWordsInRange(
