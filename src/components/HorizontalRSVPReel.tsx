@@ -5,9 +5,10 @@ import { ThemeConfig } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 
 export interface HorizontalRSVPReelProps {
-  words: HighlightedWordParts[];
-  currentIndex: number;
+  words?: HighlightedWordParts[];
+  getWordAt?: (index: number) => HighlightedWordParts | undefined;
   totalWords?: number;
+  currentIndex: number;
   chunkSize: 1 | 3 | 5;
   isPlaying: boolean;
   settings: ReaderSettings;
@@ -21,8 +22,9 @@ const BUFFER_SIZE = 16;
 
 export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   words,
-  currentIndex,
+  getWordAt,
   totalWords,
+  currentIndex,
   chunkSize,
   isPlaying,
   settings,
@@ -38,6 +40,9 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   const prevIndexRef = useRef(currentIndex);
   const prevChunkPageRef = useRef(Math.floor(currentIndex / BUFFER_SIZE));
   const isFirstRenderRef = useRef(true);
+
+  // Total word count bound
+  const total = totalWords ?? (words ? words.length : 1);
 
   // Scale font size slightly for 3 and 5 words so they fit gracefully across all screens
   const effectiveFontSize = useMemo(() => {
@@ -59,13 +64,7 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   }, [effectiveFontSize]);
 
   // Dynamic animation duration based on word delay & WPM
-  const currentWord = useMemo(() => {
-    const matched = words.find((w) => w.index === currentIndex);
-    if (matched) return matched;
-    if (words[currentIndex]) return words[currentIndex];
-    return words[0];
-  }, [words, currentIndex]);
-
+  const currentWord = (getWordAt ? getWordAt(currentIndex) : words?.[currentIndex]) || words?.[0];
   const wordDelayMs = useMemo(() => {
     if (!currentWord) return 200;
     return calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause);
@@ -77,30 +76,21 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
     return Math.min(0.26, Math.max(0.07, (wordDelayMs / 1000) * 0.7));
   }, [isPlaying, wordDelayMs]);
 
-  // Support both windowed words (where array has subset of words with .index) and flat arrays
-  const hasWindowIndexedWords = words.length > 0 && words.some((w) => w.index !== undefined);
-  const maxDocWords = totalWords || words.length;
-
+  // Chunking to keep DOM nodes stable and prevent layout shifts during GSAP translation
   const chunkPage = Math.floor(currentIndex / BUFFER_SIZE);
   const chunkStart = Math.max(0, chunkPage * BUFFER_SIZE - 8);
-  const chunkEnd = Math.min(maxDocWords - 1, (chunkPage + 1) * BUFFER_SIZE + 8);
+  const chunkEnd = Math.min(total - 1, (chunkPage + 1) * BUFFER_SIZE + 8);
 
   const visibleWords = useMemo(() => {
-    if (hasWindowIndexedWords) {
-      return words
-        .filter((w) => Math.abs(w.index - currentIndex) <= 8)
-        .sort((a, b) => a.index - b.index)
-        .map((w) => ({ word: w, index: w.index }));
-    }
-
     const list: { word: HighlightedWordParts; index: number }[] = [];
     for (let i = chunkStart; i <= chunkEnd; i++) {
-      if (words[i]) {
-        list.push({ word: words[i], index: i });
+      const w = getWordAt ? getWordAt(i) : words?.[i];
+      if (w) {
+        list.push({ word: w, index: i });
       }
     }
     return list;
-  }, [words, hasWindowIndexedWords, currentIndex, chunkStart, chunkEnd]);
+  }, [words, getWordAt, chunkStart, chunkEnd]);
 
   const isTextRtl = Boolean(currentWord?.isRtl);
 

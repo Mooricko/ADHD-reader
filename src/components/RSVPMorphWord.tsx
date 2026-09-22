@@ -9,6 +9,7 @@ interface RSVPMorphWordProps {
   currentWord: HighlightedWordParts;
   currentIndex: number;
   allWords?: HighlightedWordParts[];
+  getWordAt?: (index: number) => HighlightedWordParts | undefined;
   totalWords?: number;
   isPlaying: boolean;
   settings: ReaderSettings;
@@ -63,6 +64,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
   currentWord,
   currentIndex,
   allWords = [],
+  getWordAt,
   totalWords,
   isPlaying,
   settings,
@@ -273,8 +275,9 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
     return (
       <HorizontalRSVPReel
         words={allWords && allWords.length > 0 ? allWords : [currentWord]}
-        currentIndex={currentIndex}
+        getWordAt={getWordAt}
         totalWords={totalWords}
+        currentIndex={currentIndex}
         chunkSize={settings.chunkSize as 1 | 3 | 5}
         isPlaying={isPlaying}
         settings={settings}

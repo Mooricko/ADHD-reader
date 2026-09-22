@@ -233,10 +233,6 @@ export interface ReaderDocumentHandle {
   readonly id: string;
   getMetadata(): Promise<DocumentMetadata>;
   getChunk(chunkIndex: number): Promise<DocumentChunk | null>;
-  getProcessedWordsForChunk(
-    chunkIndex: number,
-    highlightStyle?: HighlightStyle
-  ): Promise<HighlightedWordParts[]>;
   getAdjacentChunks(currentChunkIndex: number, radius?: number): Promise<DocumentChunk[]>;
   getWordsSlice(
     startIndex: number,
@@ -256,6 +252,11 @@ export interface ReaderDocumentHandle {
   }>;
   getFullText(): Promise<string>;
   updateProgress(wordIndex: number): Promise<void>;
+  // Phase 4.5 & Phase 5 chunk window and processing extensions
+  setActiveChunk?(currentChunkIndex: number, windowRadius?: number): void;
+  getLocationIndex?(): Promise<DocumentLocationIndex | null>;
+  getProcessedWordsForChunk?(chunkIndex: number, highlightStyle?: HighlightStyle): Promise<HighlightedWordParts[]>;
+  preloadChunkWindow?(currentChunkIndex: number, highlightStyle?: HighlightStyle, radius?: number): Promise<DocumentChunk[]>;
   // Phase 3 extensions
   getStructure(): Promise<DocumentStructure | null>;
   getPages(): Promise<PageIndexEntry[] | null>;

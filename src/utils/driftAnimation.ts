@@ -93,6 +93,24 @@ export function precalculateDriftOffsets(
 }
 
 /**
+ * Computes deterministic drift offset on-the-fly for a single word in O(1).
+ * Eliminates the need to allocate large number arrays for massive documents.
+ */
+export function getDriftOffsetForWord(
+  globalIndex: number,
+  intensity: DriftIntensity = 'moderate',
+  enabled = true,
+  word?: HighlightedWordParts
+): number {
+  if (!enabled || globalIndex < 0) return 0;
+  const multiplier = DRIFT_INTENSITY_CONFIGS[intensity]?.multiplier ?? 1.0;
+  // Natural station step: roughly every 10 words
+  const stationIndex = Math.floor(globalIndex / 10);
+  const baseOffset = BASE_DRIFT_OFFSETS[stationIndex % BASE_DRIFT_OFFSETS.length];
+  return Math.round(baseOffset * multiplier);
+}
+
+/**
  * Analyzes a specific drift offset value into human-readable direction and metrics.
  */
 export function getDriftMetrics(offsetPx: number, intensity: DriftIntensity = 'moderate'): DriftState {
