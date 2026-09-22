@@ -274,7 +274,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
     settings.warmupMode,
     settings.metronomeSound, 
     settings.metronomeVolume, 
-    words,
+    words.length > 0,
     effectiveTotalWords
   ]);
 
@@ -334,7 +334,14 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
         totalWords: effectiveTotalWordsRef.current,
         getWordsSlice: getWordsSliceRef.current,
         settings: settingsRef.current,
+        getCurrentWpm: () => {
+          if (warmupStatusRef.current?.isWarmingUp) {
+            return warmupStatusRef.current.currentWpm;
+          }
+          return settingsRef.current.wpm;
+        },
         onWordSync: (syncedIdx) => {
+          onWordStepRef.current?.();
           onIndexChange(syncedIdx);
           if (settingsRef.current.metronomeSound) {
             const currentW = wordsRef.current.find(w => w.index === syncedIdx) || wordsRef.current[syncedIdx];

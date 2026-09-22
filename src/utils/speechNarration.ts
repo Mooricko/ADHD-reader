@@ -15,6 +15,31 @@ export interface VoiceOption {
 export type WordSyncCallback = (wordIndex: number) => void;
 export type FinishedCallback = () => void;
 
+/**
+ * Retains strong references to in-flight utterances to prevent
+ * Chromium / WebKit V8 garbage collection mid-speech.
+ */
+const activeUtterances = new Set<SpeechSynthesisUtterance>();
+
+/**
+ * Detects the predominant language tag for a given text snippet.
+ */
+export function detectLanguageFromText(text: string): string {
+  if (!text) return 'en-US';
+  if (/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text)) {
+    return 'fa-IR';
+  }
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru-RU';
+  if (/[\u3040-\u30FF]/.test(text)) return 'ja-JP';
+  if (/[\u4E00-\u9FFF]/.test(text)) return 'zh-CN';
+  if (/[\uAC00-\uD7AF]/.test(text)) return 'ko-KR';
+  if (/[\u0590-\u05FF]/.test(text)) return 'he-IL';
+  if (/[äößÄÖ]/u.test(text) || (/[üÜ]/u.test(text) && !/[áíóñ]/iu.test(text))) return 'de-DE';
+  if (/[¿¡ñáíóú]/iu.test(text)) return 'es-ES';
+  if (/[éèêëàâîïôûùç]/iu.test(text)) return 'fr-FR';
+  return 'en-US';
+}
+
 class SpeechNarrationService {
   private synth: SpeechSynthesis | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
@@ -30,8 +55,10 @@ class SpeechNarrationService {
   private activeCharOffsets: { start: number; end: number; index: number }[] = [];
   private fallbackTimer: NodeJS.Timeout | null = null;
   private hasReceivedBoundary: boolean = false;
+  private boundarySupported: boolean = false;
   private synthTimer: NodeJS.Timeout | null = null;
-
+  private chunkTransitionTimer: NodeJS.Timeout | null = null;
+  private keepAliveTimer: NodeJS.Timeout | null = null;
   private initialized: boolean = false;
 
   constructor() {
@@ -66,6 +93,11 @@ class SpeechNarrationService {
         this.synth.onvoiceschanged = () => {
           this.loadVoices();
         };
+      }
+      // Fallback poll for sandboxed iframe environments where voiceschanged may not trigger
+      if (typeof window !== 'undefined' && !this.voicesLoaded) {
+        setTimeout(() => this.loadVoices(), 150);
+        setTimeout(() => this.loadVoices(), 600);
       }
     } catch (e) {
       console.warn('Could not bind voiceschanged listener:', e);
@@ -205,7 +237,7 @@ class SpeechNarrationService {
   /**
    * Find selected voice or appropriate language voice
    */
-  private resolveVoice(voiceURI?: string, isFarsiText?: boolean): SpeechSynthesisVoice | null {
+  private resolveVoice(voiceURI?: string, targetLang?: string): SpeechSynthesisVoice | null {
     const synth = this.getSynth();
     if (!synth) return null;
     if (this.voices.length === 0) {
@@ -213,28 +245,31 @@ class SpeechNarrationService {
     }
     if (this.voices.length === 0) return null;
 
-    // Handle virtual Farsi voice resolution to installed browser voices
-    if (voiceURI === 'farsi-microsoft-dilara') {
-      const match = this.voices.find(v => v.name.toLowerCase().includes('dilara') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
-      if (match) return match;
-    } else if (voiceURI === 'farsi-microsoft-farid') {
-      const match = this.voices.find(v => v.name.toLowerCase().includes('farid') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
-      if (match) return match;
-    } else if (voiceURI === 'farsi-webspeech-cloud') {
-      const match = this.voices.find(v => v.lang.startsWith('fa') || v.name.toLowerCase().includes('persian') || v.name.includes('فارسی'));
-      if (match) return match;
-    } else if (voiceURI && voiceURI !== 'farsi-webaudio-synth') {
-      const match = this.voices.find((v) => v.voiceURI === voiceURI);
+    // 1. Handle explicit voice URI or name
+    if (voiceURI && voiceURI !== 'farsi-webaudio-synth') {
+      if (voiceURI === 'farsi-microsoft-dilara') {
+        const match = this.voices.find(v => v.name.toLowerCase().includes('dilara') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
+        if (match) return match;
+      } else if (voiceURI === 'farsi-microsoft-farid') {
+        const match = this.voices.find(v => v.name.toLowerCase().includes('farid') || (v.lang.startsWith('fa') && v.name.includes('Microsoft')));
+        if (match) return match;
+      } else if (voiceURI === 'farsi-webspeech-cloud') {
+        const match = this.voices.find(v => v.lang.startsWith('fa') || v.name.toLowerCase().includes('persian') || v.name.includes('فارسی'));
+        if (match) return match;
+      }
+
+      const match = this.voices.find((v) => v.voiceURI === voiceURI || v.name === voiceURI);
       if (match) return match;
     }
 
-    // If reading Farsi text and no specific voice was locked, prioritize a Farsi voice
-    if (isFarsiText) {
-      const farsiVoice = this.voices.find(v => v.lang.startsWith('fa') || v.name.toLowerCase().includes('persian') || v.name.includes('فارسی'));
-      if (farsiVoice) return farsiVoice;
+    // 2. Language-based resolution (e.g. fa, es, de, fr, en)
+    if (targetLang) {
+      const langPrefix = targetLang.split('-')[0].toLowerCase();
+      const match = this.voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+      if (match) return match;
     }
 
-    // Default to an English voice or system default
+    // 3. Default to an English voice or system default
     const englishVoice = this.voices.find((v) => v.lang.startsWith('en') && v.default) 
       || this.voices.find((v) => v.lang.startsWith('en'))
       || this.voices.find((v) => v.default)
@@ -246,11 +281,34 @@ class SpeechNarrationService {
   /**
    * Calculate Web Speech rate from RSVP WPM
    * Normal conversational speed ~ 150-160 WPM = rate 1.0
+   * Clamped to 0.5 - 2.5 to prevent speech engine failure/distortion.
    */
   public computeSpeechRate(wpm: number, multiplier: number = 1.0): number {
     const rawRate = (wpm / 160) * multiplier;
-    // Web Speech API rate valid range is roughly 0.5 to 3.0 in modern browsers
-    return Math.max(0.5, Math.min(3.0, Number(rawRate.toFixed(2))));
+    return Math.max(0.5, Math.min(2.5, Number(rawRate.toFixed(2))));
+  }
+
+  /**
+   * Chromium keep-alive timer to prevent speech engine from silently pausing after ~15s
+   */
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      const synth = this.getSynth();
+      if (synth && synth.speaking && !synth.paused) {
+        try {
+          synth.pause();
+          synth.resume();
+        } catch {}
+      }
+    }, 10000);
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
   }
 
   /**
@@ -258,11 +316,17 @@ class SpeechNarrationService {
    */
   public stop(): void {
     this.activeUtteranceId++;
+    this.stopKeepAlive();
     this.clearFallbackTimer();
     this.clearSynthTimer();
+    if (this.chunkTransitionTimer) {
+      clearTimeout(this.chunkTransitionTimer);
+      this.chunkTransitionTimer = null;
+    }
     this.isSpeaking = false;
     this.currentUtterance = null;
     this.lastReportedWordIndex = -1;
+    activeUtterances.clear();
     persianAudioSynth.stop();
     const synth = this.getSynth();
     if (synth) {
@@ -308,6 +372,8 @@ class SpeechNarrationService {
     if (!synth) return;
 
     try {
+      if (synth.paused) synth.resume();
+
       const isFarsi = voiceURI.startsWith('farsi-') || 
         this.voices.some(v => v.voiceURI === voiceURI && (v.lang.startsWith('fa') || v.name.includes('فارسی')));
 
@@ -316,17 +382,22 @@ class SpeechNarrationService {
         : "ADHD Reader audio narration is active. Ready to focus.";
 
       const utterance = new SpeechSynthesisUtterance(samplePhrase);
+      activeUtterances.add(utterance);
+      utterance.onend = () => activeUtterances.delete(utterance);
+      utterance.onerror = () => activeUtterances.delete(utterance);
+
       if (isFarsi) {
         utterance.lang = 'fa-IR';
       }
 
-      const voice = this.resolveVoice(voiceURI, isFarsi);
+      const voice = this.resolveVoice(voiceURI, isFarsi ? 'fa-IR' : 'en-US');
       if (voice) utterance.voice = voice;
       utterance.pitch = Math.max(0.5, Math.min(1.5, pitch));
       utterance.rate = Math.max(0.5, Math.min(2.5, rate));
       utterance.volume = Math.max(0, Math.min(1, volume));
 
       synth.speak(utterance);
+      if (synth.paused) synth.resume();
     } catch (err) {
       console.warn('Voice preview error:', err);
     }
@@ -393,8 +464,9 @@ class SpeechNarrationService {
     if (!synth || !this.isSupported()) return;
 
     // Locate matching start position within the words slice
+    const hasIndexedWords = words.length > 0 && words.some(w => typeof w.index === 'number');
     let localStartIndex = -1;
-    if (words.length > 0 && typeof words[0].index === 'number') {
+    if (hasIndexedWords) {
       localStartIndex = words.findIndex((w) => w.index === startIndex);
     } else if (startIndex >= 0 && startIndex < words.length) {
       localStartIndex = startIndex;
@@ -425,12 +497,18 @@ class SpeechNarrationService {
         });
         return;
       }
-      localStartIndex = Math.max(0, Math.min(words.length - 1, startIndex));
+      if (startIndex >= 0 && startIndex < words.length) {
+        localStartIndex = startIndex;
+      } else {
+        this.isSpeaking = false;
+        onFinished();
+        return;
+      }
     }
 
     // 1. Determine a natural chunk:
-    // When warming up, use smaller, naturally-bounded chunks (5-8 words or clause pauses)
-    // so speech acceleration matches visual warm-up ramp between phrases without audio clipping.
+    // When warming up, use smaller chunks (5-8 words or clause pauses)
+    // so speech acceleration matches visual warm-up ramp between phrases.
     let localEndIndex = Math.max(0, Math.min(words.length - 1, localStartIndex));
     const maxChunkSize = isWarmingUp ? 8 : 25;
     while (localEndIndex < words.length - 1 && (localEndIndex - localStartIndex) < maxChunkSize) {
@@ -444,6 +522,12 @@ class SpeechNarrationService {
 
     this.activeChunkStartIndex = startIndex;
     this.activeChunkWords = words.slice(localStartIndex, localEndIndex + 1);
+    if (this.activeChunkWords.length === 0) {
+      this.isSpeaking = false;
+      onFinished();
+      return;
+    }
+
     const lastWord = this.activeChunkWords[this.activeChunkWords.length - 1];
     this.activeChunkEndIndex = typeof lastWord?.index === 'number' ? lastWord.index : startIndex + this.activeChunkWords.length - 1;
 
@@ -454,7 +538,7 @@ class SpeechNarrationService {
     const textPieces: string[] = [];
     for (let i = 0; i < this.activeChunkWords.length; i++) {
       const wordObj = this.activeChunkWords[i];
-      const wordStr = wordObj.original;
+      const wordStr = wordObj.original || '';
       textPieces.push(wordStr);
 
       const wordStart = accumulatedOffset;
@@ -513,24 +597,42 @@ class SpeechNarrationService {
 
     // Check if chunk is Farsi / RTL
     const isFarsi = isRtlText(chunkText) || (settings.speechVoiceURI && settings.speechVoiceURI.startsWith('farsi-'));
+    const detectedLang = isFarsi ? 'fa-IR' : detectLanguageFromText(chunkText);
 
     // 3. Create and configure Utterance
     const utterance = new SpeechSynthesisUtterance(chunkText);
     this.currentUtterance = utterance;
+    activeUtterances.add(utterance);
 
-    if (isFarsi) {
-      utterance.lang = 'fa-IR';
-    }
-
-    const voice = this.resolveVoice(settings.speechVoiceURI, isFarsi);
+    utterance.lang = detectedLang;
+    const voice = this.resolveVoice(settings.speechVoiceURI, detectedLang);
     if (voice) utterance.voice = voice;
 
     utterance.pitch = Math.max(0.5, Math.min(1.5, settings.speechPitch || 1.0));
     utterance.volume = Math.max(0, Math.min(1, settings.speechVolume ?? 1.0));
-    // Calculate rate dynamically based on current effective warm-up WPM
     utterance.rate = this.computeSpeechRate(currentWpm, settings.speechRateMultiplier || 1.0);
 
-    // 4. Synchronize word boundary events with visual RSVP
+    // 4. Utterance start event: unpause keepalive and prime first word
+    utterance.onstart = () => {
+      if (
+        this.activeUtteranceId !== utteranceId ||
+        this.currentUtterance !== utterance ||
+        !isPlayingCheck() ||
+        !this.isSpeaking
+      ) {
+        return;
+      }
+      this.startKeepAlive();
+
+      // Ensure the first word in the chunk is synced as soon as audio starts
+      if (this.lastReportedWordIndex < startIndex && this.activeCharOffsets.length > 0) {
+        const firstIdx = this.activeCharOffsets[0].index;
+        this.lastReportedWordIndex = firstIdx;
+        onWordSync(firstIdx);
+      }
+    };
+
+    // 5. Synchronize word boundary events with visual RSVP
     utterance.onboundary = (event: SpeechSynthesisEvent) => {
       // Guard against stale utterances, stopped state, or cancelled tasks
       if (
@@ -542,25 +644,32 @@ class SpeechNarrationService {
         return;
       }
 
-      // Ignore non-word boundaries (such as 'sentence' boundaries in Chrome)
+      // Ignore non-word boundaries (such as sentence or paragraph in Chrome)
       if (event.name && event.name !== 'word') {
         return;
       }
 
       this.hasReceivedBoundary = true;
+      this.boundarySupported = true;
       this.clearFallbackTimer();
 
       const charIdx = event.charIndex;
       if (typeof charIdx === 'number' && charIdx >= 0) {
-        // Find corresponding word in our continuous offset map
         let matchedIndex = -1;
         for (let i = 0; i < this.activeCharOffsets.length; i++) {
           const cur = this.activeCharOffsets[i];
           const next = this.activeCharOffsets[i + 1];
-          // Check if charIndex is within this word token or space up to next word
           if (charIdx >= cur.start && (!next || charIdx < next.start)) {
             matchedIndex = cur.index;
             break;
+          }
+        }
+
+        // Safeguard for engines that report charIndex: 0 repeatedly on every word boundary
+        if (charIdx === 0 && this.lastReportedWordIndex >= startIndex && this.activeCharOffsets.length > 1) {
+          const nextStep = this.lastReportedWordIndex + 1;
+          if (nextStep <= this.activeChunkEndIndex) {
+            matchedIndex = nextStep;
           }
         }
 
@@ -568,7 +677,6 @@ class SpeechNarrationService {
           matchedIndex = this.activeCharOffsets[this.activeCharOffsets.length - 1].index;
         }
 
-        // Only fire if advancing forward and hasn't already been reported
         if (matchedIndex > this.lastReportedWordIndex) {
           this.lastReportedWordIndex = matchedIndex;
           onWordSync(matchedIndex);
@@ -576,9 +684,12 @@ class SpeechNarrationService {
       }
     };
 
-    // 5. Utterance completion: chain into the next chunk
+    // 6. Utterance completion: chain smoothly into the next chunk
     utterance.onend = () => {
+      this.stopKeepAlive();
       this.clearFallbackTimer();
+      activeUtterances.delete(utterance);
+
       if (
         this.activeUtteranceId !== utteranceId ||
         this.currentUtterance !== utterance ||
@@ -588,45 +699,65 @@ class SpeechNarrationService {
         return;
       }
 
+      // Ensure the final word in this chunk was synced before transitioning
+      if (this.lastReportedWordIndex < this.activeChunkEndIndex) {
+        this.lastReportedWordIndex = this.activeChunkEndIndex;
+        onWordSync(this.activeChunkEndIndex);
+      }
+
       const nextIndex = this.activeChunkEndIndex + 1;
       if (nextIndex < effectiveTotalWords) {
-        if (getWordsSlice) {
-          getWordsSlice(nextIndex, 30).then((nextSlice) => {
-            if (nextSlice.length > 0 && isPlayingCheck() && this.isSpeaking) {
-              this.speakFromIndex({
-                words: nextSlice,
-                startIndex: nextIndex,
-                settings,
-                onWordSync,
-                onFinished,
-                isPlayingCheck,
-                getCurrentWpm,
-                getWordsSlice,
-                totalWords: effectiveTotalWords,
-              });
-            } else {
+        // Natural gentle punctuation pause between sentences/chunks
+        const lastWordObj = this.activeChunkWords[this.activeChunkWords.length - 1];
+        const pauseDelay = lastWordObj?.hasSentenceEnd ? 100 : (lastWordObj?.hasClausePause ? 50 : 20);
+
+        this.chunkTransitionTimer = setTimeout(() => {
+          if (
+            this.activeUtteranceId !== utteranceId ||
+            !isPlayingCheck() ||
+            !this.isSpeaking
+          ) {
+            return;
+          }
+
+          if (getWordsSlice) {
+            getWordsSlice(nextIndex, 30).then((nextSlice) => {
+              if (nextSlice.length > 0 && isPlayingCheck() && this.isSpeaking && this.activeUtteranceId === utteranceId) {
+                this.speakFromIndex({
+                  words: nextSlice,
+                  startIndex: nextIndex,
+                  settings,
+                  onWordSync,
+                  onFinished,
+                  isPlayingCheck,
+                  getCurrentWpm,
+                  getWordsSlice,
+                  totalWords: effectiveTotalWords,
+                });
+              } else {
+                this.isSpeaking = false;
+                this.currentUtterance = null;
+                onFinished();
+              }
+            }).catch(() => {
               this.isSpeaking = false;
               this.currentUtterance = null;
               onFinished();
-            }
-          }).catch(() => {
-            this.isSpeaking = false;
-            this.currentUtterance = null;
-            onFinished();
-          });
-        } else {
-          this.speakFromIndex({
-            words,
-            startIndex: nextIndex,
-            settings,
-            onWordSync,
-            onFinished,
-            isPlayingCheck,
-            getCurrentWpm,
-            getWordsSlice,
-            totalWords: effectiveTotalWords,
-          });
-        }
+            });
+          } else {
+            this.speakFromIndex({
+              words,
+              startIndex: nextIndex,
+              settings,
+              onWordSync,
+              onFinished,
+              isPlayingCheck,
+              getCurrentWpm,
+              getWordsSlice,
+              totalWords: effectiveTotalWords,
+            });
+          }
+        }, pauseDelay);
       } else {
         this.isSpeaking = false;
         this.currentUtterance = null;
@@ -635,14 +766,69 @@ class SpeechNarrationService {
     };
 
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+      this.stopKeepAlive();
       this.clearFallbackTimer();
+      activeUtterances.delete(utterance);
+
       if (this.activeUtteranceId !== utteranceId) return;
+
       if (event.error !== 'canceled' && event.error !== 'interrupted') {
         console.warn('Speech synthesis error:', event.error);
+
+        // Auto-recover: do not stall the reader indefinitely!
+        if (isPlayingCheck() && this.isSpeaking) {
+          const nextIndex = this.activeChunkEndIndex + 1;
+          if (nextIndex < effectiveTotalWords) {
+            setTimeout(() => {
+              if (isPlayingCheck() && this.isSpeaking && this.activeUtteranceId === utteranceId) {
+                if (getWordsSlice) {
+                  getWordsSlice(nextIndex, 30).then((slice) => {
+                    if (slice.length > 0 && isPlayingCheck() && this.isSpeaking && this.activeUtteranceId === utteranceId) {
+                      this.speakFromIndex({
+                        words: slice,
+                        startIndex: nextIndex,
+                        settings,
+                        onWordSync,
+                        onFinished,
+                        isPlayingCheck,
+                        getCurrentWpm,
+                        getWordsSlice,
+                        totalWords: effectiveTotalWords,
+                      });
+                    } else {
+                      this.isSpeaking = false;
+                      onFinished();
+                    }
+                  }).catch(() => {
+                    this.isSpeaking = false;
+                    onFinished();
+                  });
+                } else {
+                  this.speakFromIndex({
+                    words,
+                    startIndex: nextIndex,
+                    settings,
+                    onWordSync,
+                    onFinished,
+                    isPlayingCheck,
+                    getCurrentWpm,
+                    getWordsSlice,
+                    totalWords: effectiveTotalWords,
+                  });
+                }
+              }
+            }, 80);
+            return;
+          }
+        }
       }
+
+      this.isSpeaking = false;
+      this.currentUtterance = null;
+      onFinished();
     };
 
-    // 6. Speak the utterance
+    // 7. Speak the utterance with pause-resume safeguard for Chrome
     try {
       const activeSynth = this.getSynth();
       if (activeSynth) {
@@ -650,12 +836,15 @@ class SpeechNarrationService {
           activeSynth.resume();
         }
         activeSynth.speak(utterance);
+        if (activeSynth.paused) {
+          activeSynth.resume();
+        }
       }
     } catch (err) {
       console.warn('Speech speak call failed:', err);
     }
 
-    // 7. Setup fallback timer in case browser does not support onboundary events
+    // 8. Setup fallback timer in case browser does not support onboundary events
     this.scheduleFallbackWordPacing({
       words: this.activeChunkWords,
       chunkStartIndex: startIndex,
@@ -703,8 +892,9 @@ class SpeechNarrationService {
       return;
     }
 
+    const hasIndexedWords = words.length > 0 && words.some(w => typeof w.index === 'number');
     let localIdx = -1;
-    if (words.length > 0 && typeof words[0].index === 'number') {
+    if (hasIndexedWords) {
       localIdx = words.findIndex((w) => w.index === index);
     } else if (index >= 0 && index < words.length) {
       localIdx = index;
@@ -736,7 +926,13 @@ class SpeechNarrationService {
         });
         return;
       }
-      localIdx = Math.max(0, Math.min(words.length - 1, index));
+      if (index >= 0 && index < words.length) {
+        localIdx = index;
+      } else {
+        this.isSpeaking = false;
+        onFinished();
+        return;
+      }
     }
 
     const currentWord = words[localIdx];
@@ -768,7 +964,7 @@ class SpeechNarrationService {
 
     this.synthTimer = setTimeout(() => {
       if (!isPlayingCheck() || this.activeUtteranceId !== utteranceId) return;
-      const nextIdx = index + 1;
+      const nextIdx = currentGlobalIdx + 1;
       if (nextIdx >= effectiveTotalWords) {
         this.isSpeaking = false;
         onFinished();
@@ -837,6 +1033,8 @@ class SpeechNarrationService {
     isPlayingCheck: () => boolean;
     utteranceId: number;
   }): void {
+    if (this.boundarySupported) return;
+
     let currentIdx = chunkStartIndex;
 
     const stepWord = () => {
@@ -859,7 +1057,10 @@ class SpeechNarrationService {
     };
 
     const initialWord = words.find((w) => w.index === chunkStartIndex) || (words[chunkStartIndex] && (words[chunkStartIndex].index === undefined || words[chunkStartIndex].index === chunkStartIndex) ? words[chunkStartIndex] : words[0]);
-    const initialDelay = calculateWordDelayMs(initialWord, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
+    const wordDelay = calculateWordDelayMs(initialWord, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
+    // 350ms grace window for the speech engine to emit onstart / onboundary before fallback pacing steps in
+    const initialDelay = Math.max(350, wordDelay);
+
     this.fallbackTimer = setTimeout(stepWord, initialDelay);
   }
 }

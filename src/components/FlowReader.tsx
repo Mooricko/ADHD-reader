@@ -293,7 +293,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     settings.smartPunctuationPause,
     settings.smartPace,
     settings.warmupMode,
-    words,
+    words.length > 0,
     effectiveTotalWords
   ]);
 

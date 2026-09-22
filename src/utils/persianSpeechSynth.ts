@@ -9,7 +9,7 @@
 class PersianSpeechSynthesizer {
   private ctx: AudioContext | null = null;
   private isPlaying: boolean = false;
-  private currentTimeout: NodeJS.Timeout | null = null;
+  private timeouts: NodeJS.Timeout[] = [];
 
   private initCtx(): AudioContext | null {
     if (!this.ctx && typeof window !== 'undefined') {
@@ -19,7 +19,7 @@ class PersianSpeechSynthesizer {
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {});
     }
     return this.ctx;
   }
@@ -117,6 +117,15 @@ class PersianSpeechSynthesizer {
       f2.connect(gain);
       gain.connect(ctx.destination);
 
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          f1.disconnect();
+          f2.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+
       osc.start(now);
       osc.stop(now + safeDuration);
     } catch (e) {
@@ -129,10 +138,10 @@ class PersianSpeechSynthesizer {
    */
   public stop(): void {
     this.isPlaying = false;
-    if (this.currentTimeout) {
-      clearTimeout(this.currentTimeout);
-      this.currentTimeout = null;
+    for (const t of this.timeouts) {
+      clearTimeout(t);
     }
+    this.timeouts = [];
   }
 
   /**
@@ -145,13 +154,14 @@ class PersianSpeechSynthesizer {
     this.isPlaying = true;
 
     previewWords.forEach((word, idx) => {
-      this.currentTimeout = setTimeout(() => {
+      const t = setTimeout(() => {
         if (!this.isPlaying) return;
         this.speakWord(word, 260, pitch, volume);
         if (idx === previewWords.length - 1) {
           this.isPlaying = false;
         }
       }, delay);
+      this.timeouts.push(t);
       delay += 320;
     });
   }
