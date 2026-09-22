@@ -23,7 +23,7 @@ import { ReadingHeatmapProgress } from './ReadingHeatmapProgress';
 import { LayoutGroup } from 'motion/react';
 import { measureDevTiming } from '../utils/performanceDiagnostics';
 
-import { ReaderDocumentHandle } from '../types';
+import { ReaderDocumentHandle, ParagraphIndexEntry } from '../types';
 
 interface FlowReaderProps {
   words: HighlightedWordParts[];
@@ -53,10 +53,39 @@ interface ParagraphGroup {
   words: Array<{ word: HighlightedWordParts; globalIndex: number }>;
 }
 
+/**
+ * Fast binary search to find the paragraphIndex for a global word index
+ * using pre-processed structural paragraph index entries.
+ */
+function findParagraphIndexForWord(
+  paragraphs: ParagraphIndexEntry[],
+  wordIndex: number
+): number {
+  if (!paragraphs || paragraphs.length === 0) return 0;
+  let low = 0;
+  let high = paragraphs.length - 1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const p = paragraphs[mid];
+    if (wordIndex >= p.startWordIndex && wordIndex <= p.endWordIndex) {
+      return p.paragraphIndex;
+    }
+    if (wordIndex < p.startWordIndex) {
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  if (low >= paragraphs.length) return paragraphs[paragraphs.length - 1].paragraphIndex;
+  return paragraphs[Math.max(0, high)].paragraphIndex;
+}
+
 export const FlowReader: React.FC<FlowReaderProps> = ({
   words,
   totalWords: customTotalWords,
-  handle: _handle,
+  handle,
   getWordsSlice,
   currentIndex,
   onIndexChange,
@@ -90,6 +119,33 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const [hoveredWordIndex, setHoveredWordIndex] = useState<number | null>(null);
   const [hoveredParagraphIndex, setHoveredParagraphIndex] = useState<number | null>(null);
 
+  // Document-level natural paragraph structure loaded from handle (double newline pre-processing)
+  const [docParagraphs, setDocParagraphs] = useState<ParagraphIndexEntry[] | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!handle) {
+      setDocParagraphs(null);
+      return;
+    }
+
+    // Pre-process document structure to detect natural double-newline breaks
+    handle
+      .getStructure()
+      .then((structure) => {
+        if (!isCancelled && structure?.paragraphs && structure.paragraphs.length > 0) {
+          setDocParagraphs(structure.paragraphs);
+        }
+      })
+      .catch((err) => {
+        console.warn('[FlowReader] Failed to load document paragraph structure:', err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [handle]);
+
   const isPlayingRef = useRef(isPlaying);
   const currentIndexRef = useRef(currentIndex);
   const settingsRef = useRef(settings);
@@ -114,18 +170,123 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
     onWordStepRef.current = onWordStep;
   }, [isPlaying, currentIndex, settings, words, effectiveTotalWords, getWordsSlice, onTogglePlay, onIndexChange, warmupStatus, onWordStep]);
 
-  // Group words by paragraphIndex for paragraph-level focus blur and centering
+  // Group words into paragraphs using robust natural break detection (double newlines)
   const paragraphGroups = useMemo<ParagraphGroup[]>(() => {
     if (!words || words.length === 0) return [];
 
     return measureDevTiming(
-      'FlowReader paragraph grouping',
+      'FlowReader natural paragraph grouping',
       () => {
         const groups: ParagraphGroup[] = [];
-        let currentGroup: ParagraphGroup | null = null;
 
-        words.forEach((w, idx) => {
-          if (!w) return;
+        // Strategy A: Pre-processed Document Structure with Natural Double-Newline Breaks
+        if (docParagraphs && docParagraphs.length > 0) {
+          let currentGroup: ParagraphGroup | null = null;
+
+          for (let idx = 0; idx < words.length; idx++) {
+            const w = words[idx];
+            if (!w) continue;
+            const globalIdx = w.index !== undefined ? w.index : idx;
+            const pIdx = findParagraphIndexForWord(docParagraphs, globalIdx);
+
+            if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
+              if (currentGroup) {
+                groups.push(currentGroup);
+              }
+              currentGroup = { paragraphIndex: pIdx, words: [] };
+            }
+            currentGroup.words.push({ word: w, globalIndex: globalIdx });
+          }
+
+          if (currentGroup) {
+            groups.push(currentGroup);
+          }
+
+          return groups;
+        }
+
+        // Strategy B: Token-Level Natural Break Detection (Double Newline vs Sentence End)
+        // Detect whether words contain explicit natural paragraph breaks (\n\n)
+        const hasExplicitBreaks = words.some((w) => w?.hasParagraphBreak);
+
+        if (hasExplicitBreaks) {
+          let currentPIdx = words[0]?.paragraphIndex ?? 0;
+          let currentGroup: ParagraphGroup = { paragraphIndex: currentPIdx, words: [] };
+
+          for (let idx = 0; idx < words.length; idx++) {
+            const w = words[idx];
+            if (!w) continue;
+            const globalIdx = w.index !== undefined ? w.index : idx;
+
+            currentGroup.words.push({ word: w, globalIndex: globalIdx });
+
+            // ONLY split on natural double newlines, NEVER solely on sentence-ending punctuation
+            if (w.hasParagraphBreak && idx < words.length - 1) {
+              groups.push(currentGroup);
+              const nextWord = words[idx + 1];
+              currentPIdx =
+                nextWord?.paragraphIndex !== undefined && nextWord.paragraphIndex !== currentPIdx
+                  ? nextWord.paragraphIndex
+                  : currentPIdx + 1;
+              currentGroup = { paragraphIndex: currentPIdx, words: [] };
+            }
+          }
+
+          if (currentGroup.words.length > 0) {
+            groups.push(currentGroup);
+          }
+
+          return groups;
+        }
+
+        // Strategy C: Fallback with Sentence-Punctuation Heuristic Guard
+        // If neither docParagraphs nor explicit hasParagraphBreak flags exist:
+        // Group by paragraphIndex, BUT verify that paragraphIndex changes are not just sentence ends!
+        // If every sentence end has a distinct paragraphIndex (naive sentence-as-paragraph artifact),
+        // coalesce them into natural multi-sentence paragraph blocks for clean reading flow.
+        const distinctIndices = new Set(words.map((w) => w?.paragraphIndex ?? 0)).size;
+        const sentenceEndCount = words.filter((w) => w?.hasSentenceEnd).length;
+        const isSentenceFragmented =
+          distinctIndices > 1 &&
+          sentenceEndCount > 0 &&
+          Math.abs(distinctIndices - sentenceEndCount) <= 2;
+
+        if (isSentenceFragmented) {
+          // Coalesce sentence-fragmented words into natural paragraphs (target ~60-90 words or 3-4 sentences)
+          const TARGET_WORDS_PER_PARAGRAPH = 75;
+          let currentGroup: ParagraphGroup = { paragraphIndex: 0, words: [] };
+          let pCounter = 0;
+
+          for (let idx = 0; idx < words.length; idx++) {
+            const w = words[idx];
+            if (!w) continue;
+            const globalIdx = w.index !== undefined ? w.index : idx;
+            currentGroup.words.push({ word: w, globalIndex: globalIdx });
+
+            // Allow natural paragraph boundary after a sentence end when reaching target word threshold
+            if (
+              w.hasSentenceEnd &&
+              currentGroup.words.length >= TARGET_WORDS_PER_PARAGRAPH &&
+              idx < words.length - 1
+            ) {
+              groups.push(currentGroup);
+              pCounter++;
+              currentGroup = { paragraphIndex: pCounter, words: [] };
+            }
+          }
+
+          if (currentGroup.words.length > 0) {
+            groups.push(currentGroup);
+          }
+
+          return groups;
+        }
+
+        // Standard contiguous paragraphIndex grouping
+        let currentGroup: ParagraphGroup | null = null;
+        for (let idx = 0; idx < words.length; idx++) {
+          const w = words[idx];
+          if (!w) continue;
           const pIdx = w.paragraphIndex ?? 0;
           const globalIdx = w.index !== undefined ? w.index : idx;
           if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
@@ -135,7 +296,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
             currentGroup = { paragraphIndex: pIdx, words: [] };
           }
           currentGroup.words.push({ word: w, globalIndex: globalIdx });
-        });
+        }
 
         if (currentGroup) {
           groups.push(currentGroup);
@@ -148,11 +309,25 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         paragraphCount: groups.length,
       })
     );
-  }, [words]);
+  }, [words, docParagraphs]);
 
-  // Determine current active paragraph index from currentIndex
-  const activeWord = words.find(w => w && w.index === currentIndex) || (words[currentIndex] && (words[currentIndex].index === undefined || words[currentIndex].index === currentIndex) ? words[currentIndex] : words[0]);
-  const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
+  // Determine current active paragraph index from the group containing currentIndex
+  const activeGroup = useMemo(() => {
+    if (paragraphGroups.length === 0) return null;
+    return (
+      paragraphGroups.find((g) =>
+        g.words.some((item) => item.globalIndex === currentIndex)
+      ) || paragraphGroups[0]
+    );
+  }, [paragraphGroups, currentIndex]);
+
+  const activeParagraphIndex = activeGroup?.paragraphIndex ?? 0;
+  const activeWord =
+    words.find((w) => w && w.index === currentIndex) ||
+    (words[currentIndex] &&
+    (words[currentIndex].index === undefined || words[currentIndex].index === currentIndex)
+      ? words[currentIndex]
+      : words[0]);
 
   // PART I: Paragraph-level virtualization with modest overscan region
   const OVERSCAN_PARAGRAPHS = 6;
