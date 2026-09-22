@@ -393,22 +393,50 @@ class SpeechNarrationService {
     if (!synth || !this.isSupported()) return;
 
     // Locate matching start position within the words slice
-    let localStartIndex = 0;
+    let localStartIndex = -1;
     if (words.length > 0 && typeof words[0].index === 'number') {
-      const matchPos = words.findIndex((w) => w.index === startIndex);
-      localStartIndex = matchPos !== -1 ? matchPos : Math.max(0, Math.min(words.length - 1, startIndex));
-    } else {
+      localStartIndex = words.findIndex((w) => w.index === startIndex);
+    } else if (startIndex >= 0 && startIndex < words.length) {
+      localStartIndex = startIndex;
+    }
+
+    if (localStartIndex === -1) {
+      if (getWordsSlice) {
+        getWordsSlice(startIndex, 30).then((slice) => {
+          if (slice.length > 0 && isPlayingCheck() && this.activeUtteranceId === utteranceId) {
+            this.speakFromIndex({
+              words: slice,
+              startIndex,
+              settings,
+              onWordSync,
+              onFinished,
+              isPlayingCheck,
+              getCurrentWpm,
+              getWordsSlice,
+              totalWords: effectiveTotalWords,
+            });
+          } else {
+            this.isSpeaking = false;
+            onFinished();
+          }
+        }).catch(() => {
+          this.isSpeaking = false;
+          onFinished();
+        });
+        return;
+      }
       localStartIndex = Math.max(0, Math.min(words.length - 1, startIndex));
     }
 
     // 1. Determine a natural chunk:
     // When warming up, use smaller, naturally-bounded chunks (5-8 words or clause pauses)
     // so speech acceleration matches visual warm-up ramp between phrases without audio clipping.
-    let localEndIndex = localStartIndex;
+    let localEndIndex = Math.max(0, Math.min(words.length - 1, localStartIndex));
     const maxChunkSize = isWarmingUp ? 8 : 25;
     while (localEndIndex < words.length - 1 && (localEndIndex - localStartIndex) < maxChunkSize) {
       const w = words[localEndIndex];
-      if (w.hasSentenceEnd || w.hasParagraphBreak || (isWarmingUp && (w.hasClausePause || w.original.endsWith(',')))) {
+      if (!w) break;
+      if (w.hasSentenceEnd || w.hasParagraphBreak || (isWarmingUp && (w.hasClausePause || (w.original && w.original.endsWith(','))))) {
         break;
       }
       localEndIndex++;
@@ -675,11 +703,39 @@ class SpeechNarrationService {
       return;
     }
 
-    let localIdx = 0;
+    let localIdx = -1;
     if (words.length > 0 && typeof words[0].index === 'number') {
-      const match = words.findIndex((w) => w.index === index);
-      localIdx = match !== -1 ? match : Math.max(0, Math.min(words.length - 1, index));
-    } else {
+      localIdx = words.findIndex((w) => w.index === index);
+    } else if (index >= 0 && index < words.length) {
+      localIdx = index;
+    }
+
+    if (localIdx === -1) {
+      if (getWordsSlice) {
+        getWordsSlice(index, 20).then((slice) => {
+          if (slice.length > 0 && isPlayingCheck() && this.activeUtteranceId === utteranceId) {
+            this.playPersianSynthWordByWord({
+              words: slice,
+              index,
+              settings,
+              onWordSync,
+              onFinished,
+              isPlayingCheck,
+              utteranceId,
+              getCurrentWpm,
+              getWordsSlice,
+              totalWords: effectiveTotalWords,
+            });
+          } else {
+            this.isSpeaking = false;
+            onFinished();
+          }
+        }).catch(() => {
+          this.isSpeaking = false;
+          onFinished();
+        });
+        return;
+      }
       localIdx = Math.max(0, Math.min(words.length - 1, index));
     }
 
@@ -794,7 +850,7 @@ class SpeechNarrationService {
           onWordSync(currentIdx);
         }
 
-        const word = words[currentIdx];
+        const word = words.find((w) => w.index === currentIdx) || (words[currentIdx] && (words[currentIdx].index === undefined || words[currentIdx].index === currentIdx) ? words[currentIdx] : words[0]);
         const delay = calculateWordDelayMs(word, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
         currentIdx++;
 
@@ -802,7 +858,7 @@ class SpeechNarrationService {
       }
     };
 
-    const initialWord = words[chunkStartIndex];
+    const initialWord = words.find((w) => w.index === chunkStartIndex) || (words[chunkStartIndex] && (words[chunkStartIndex].index === undefined || words[chunkStartIndex].index === chunkStartIndex) ? words[chunkStartIndex] : words[0]);
     const initialDelay = calculateWordDelayMs(initialWord, effectiveWpm, settings.smartPunctuationPause, settings.smartPace);
     this.fallbackTimer = setTimeout(stepWord, initialDelay);
   }

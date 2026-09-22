@@ -125,6 +125,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         let currentGroup: ParagraphGroup | null = null;
 
         words.forEach((w, idx) => {
+          if (!w) return;
           const pIdx = w.paragraphIndex ?? 0;
           const globalIdx = w.index !== undefined ? w.index : idx;
           if (!currentGroup || currentGroup.paragraphIndex !== pIdx) {
@@ -150,13 +151,13 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   }, [words]);
 
   // Determine current active paragraph index from currentIndex
-  const activeWord = words.find(w => w.index === currentIndex) || words[currentIndex] || words[0];
+  const activeWord = words.find(w => w && w.index === currentIndex) || (words[currentIndex] && (words[currentIndex].index === undefined || words[currentIndex].index === currentIndex) ? words[currentIndex] : words[0]);
   const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
 
   const currentWordAnalysis = useMemo(() => {
-    if (!settings.smartPace || !words[currentIndex]) return null;
-    return analyzeWordSmartPace(words[currentIndex]);
-  }, [settings.smartPace, words, currentIndex]);
+    if (!settings.smartPace || !activeWord) return null;
+    return analyzeWordSmartPace(activeWord);
+  }, [settings.smartPace, activeWord]);
 
   // Auto-scroll unblurred active paragraph to center of viewport
   const scrollToActiveParagraph = useCallback((smooth = true) => {
@@ -240,7 +241,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       onIndexChangeRef.current(nextIdx);
 
       const allWords = wordsRef.current;
-      const currentWordObj = allWords.find(w => w.index === nextIdx) || allWords[nextIdx];
+      const currentWordObj = allWords.find(w => w.index === nextIdx) || (allWords[nextIdx] && (allWords[nextIdx].index === undefined || allWords[nextIdx].index === nextIdx) ? allWords[nextIdx] : undefined);
       
       // Audio metronome tick synchronization
       if (settingsRef.current.metronomeSound && currentWordObj) {
@@ -267,7 +268,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       ? warmupStatusRef.current.currentWpm
       : settings.wpm;
 
-    const currentWordObj = words.find(w => w.index === currentIndexRef.current) || words[currentIndexRef.current] || words[0];
+    const currentWordObj = words.find(w => w.index === currentIndexRef.current) || (words[currentIndexRef.current] && (words[currentIndexRef.current].index === undefined || words[currentIndexRef.current].index === currentIndexRef.current) ? words[currentIndexRef.current] : words[0]);
     const initialDelay = currentWordObj
       ? calculateWordDelayMs(currentWordObj, effectiveWpm, settings.smartPunctuationPause, settings.smartPace)
       : (60 / effectiveWpm) * 1000;
@@ -307,7 +308,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   // Follows the user's cursor position when hovering, or defaults to current reading word
   const targetWordIndex = hoveredWordIndex !== null ? hoveredWordIndex : currentIndex;
 
-  const isTextRtl = words.length > 0 && Boolean(words[0].isRtl || words.some((w) => w.isRtl));
+  const isTextRtl = words.length > 0 && Boolean(words[0]?.isRtl || words.some((w) => w?.isRtl));
 
   return (
     <div className="flex flex-col flex-1 w-full max-w-4xl mx-auto px-4 py-3 sm:py-4 justify-between h-full min-h-0 overflow-hidden relative select-none">

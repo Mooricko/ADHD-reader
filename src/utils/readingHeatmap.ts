@@ -52,7 +52,8 @@ export function interpolateHeatmapColor(intensity: number): string {
  * Calculates intrinsic lexical complexity for a single word based on character length,
  * syllable proxies, and punctuation pauses.
  */
-export function calculateLexicalComplexity(word: HighlightedWordParts): number {
+export function calculateLexicalComplexity(word?: HighlightedWordParts | null): number {
+  if (!word || !word.original) return 0;
   const clean = word.original.replace(/[^\w]/g, '');
   const len = clean.length;
   
@@ -79,9 +80,11 @@ export function generateReadingHeatmap(
   words: HighlightedWordParts[],
   dwellTimes: number[],
   currentIndex: number,
-  wpm: number
+  wpm: number,
+  customTotalWords?: number
 ): ReadingHeatmapData {
-  if (!words || words.length === 0) {
+  const totalWords = customTotalWords !== undefined ? customTotalWords : (words ? words.length : 0);
+  if (totalWords === 0) {
     return {
       buckets: [],
       totalDwellMs: 0,
@@ -93,7 +96,27 @@ export function generateReadingHeatmap(
     };
   }
 
-  const totalWords = words.length;
+  // Build index lookup map for windowed chunks
+  const wordMap = new Map<number, HighlightedWordParts>();
+  let hasExplicitIndices = false;
+  if (words && words.length > 0) {
+    if (typeof words[0].index === 'number') {
+      hasExplicitIndices = true;
+      for (const w of words) {
+        if (typeof w.index === 'number') {
+          wordMap.set(w.index, w);
+        }
+      }
+    }
+  }
+
+  const getWordAtIndex = (idx: number): HighlightedWordParts | undefined => {
+    if (hasExplicitIndices) {
+      return wordMap.get(idx);
+    }
+    return words[idx];
+  };
+
   // Dynamic bucket count based on document size (between 30 and 75 buckets)
   const bucketCount = Math.min(75, Math.max(25, Math.floor(totalWords / 6)));
   const wordsPerBucket = totalWords / bucketCount;
@@ -107,7 +130,8 @@ export function generateReadingHeatmap(
   for (let i = 0; i < totalWords; i++) {
     const bIndex = Math.min(bucketCount - 1, Math.floor(i / wordsPerBucket));
     const recordedDwell = (dwellTimes && dwellTimes[i]) || 0;
-    const lexicalBonus = calculateLexicalComplexity(words[i]) * baselineWordMs * 0.4;
+    const wordObj = getWordAtIndex(i);
+    const lexicalBonus = wordObj ? calculateLexicalComplexity(wordObj) * baselineWordMs * 0.4 : 0;
     
     // Total effective dwell incorporates actual reader time plus baseline structure
     const effectiveDwell = recordedDwell > 0 ? recordedDwell + lexicalBonus * 0.2 : lexicalBonus * 0.5;
@@ -171,8 +195,14 @@ export function generateReadingHeatmap(
     const color = isRead ? interpolateHeatmapColor(intensity) : 'rgba(148, 163, 184, 0.22)';
 
     // Extract sample snippet
-    const snippetWords = words.slice(startWord, Math.min(endWord + 1, startWord + 6));
-    const sampleSnippet = snippetWords.map((w) => w.original).join(' ') + (endWord - startWord >= 6 ? '...' : '');
+    const snippetTokens: string[] = [];
+    for (let si = startWord; si <= Math.min(endWord, startWord + 5); si++) {
+      const w = getWordAtIndex(si);
+      if (w && w.original) snippetTokens.push(w.original);
+    }
+    const sampleSnippet = snippetTokens.length > 0
+      ? snippetTokens.join(' ') + (endWord - startWord >= 6 ? '...' : '')
+      : `Words ${startWord + 1}–${endWord + 1}`;
 
     const bucketItem: HeatmapBucket = {
       index: b,

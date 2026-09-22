@@ -699,6 +699,7 @@ export const RSVPReader: React.FC<RSVPReaderProps> = ({
               currentWord={currentWord}
               currentIndex={currentIndex}
               allWords={words}
+              totalWords={effectiveTotalWords}
               isPlaying={isPlaying}
               settings={settings}
               theme={theme}

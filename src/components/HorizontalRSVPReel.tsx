@@ -1,4 +1,4 @@
-import React, { useRef, useLayoutEffect, useEffect, useMemo } from 'react';
+import React, { useRef, useLayoutEffect, useEffect, useMemo, useCallback } from 'react';
 import { gsap } from 'gsap';
 import { HighlightedWordParts, ReaderSettings } from '../types';
 import { ThemeConfig } from '../utils/themeStyles';
@@ -63,8 +63,29 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
     return Math.max(68, Math.round(effectiveFontSize * 2.2));
   }, [effectiveFontSize]);
 
+  // Build index map for O(1) lookup when windowed chunks are provided without getWordAt
+  const wordLookup = useMemo(() => {
+    if (getWordAt) return null;
+    const map = new Map<number, HighlightedWordParts>();
+    if (words) {
+      for (const w of words) {
+        if (typeof w.index === 'number') {
+          map.set(w.index, w);
+        }
+      }
+    }
+    return map;
+  }, [words, getWordAt]);
+
+  const resolveWordAt = useCallback((idx: number) => {
+    if (getWordAt) return getWordAt(idx);
+    if (wordLookup && wordLookup.has(idx)) return wordLookup.get(idx);
+    if (words && words[idx] && (words[idx].index === undefined || words[idx].index === idx)) return words[idx];
+    return undefined;
+  }, [getWordAt, wordLookup, words]);
+
   // Dynamic animation duration based on word delay & WPM
-  const currentWord = (getWordAt ? getWordAt(currentIndex) : words?.[currentIndex]) || words?.[0];
+  const currentWord = resolveWordAt(currentIndex) || words?.[0];
   const wordDelayMs = useMemo(() => {
     if (!currentWord) return 200;
     return calculateWordDelayMs(currentWord, settings.wpm, settings.smartPunctuationPause);
@@ -84,13 +105,13 @@ export const HorizontalRSVPReel: React.FC<HorizontalRSVPReelProps> = ({
   const visibleWords = useMemo(() => {
     const list: { word: HighlightedWordParts; index: number }[] = [];
     for (let i = chunkStart; i <= chunkEnd; i++) {
-      const w = getWordAt ? getWordAt(i) : words?.[i];
+      const w = resolveWordAt(i);
       if (w) {
         list.push({ word: w, index: i });
       }
     }
     return list;
-  }, [words, getWordAt, chunkStart, chunkEnd]);
+  }, [resolveWordAt, chunkStart, chunkEnd]);
 
   const isTextRtl = Boolean(currentWord?.isRtl);
 

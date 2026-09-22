@@ -536,12 +536,16 @@ export function splitWordParts(token: string, style: HighlightStyle = 'middle-tw
  * punctuation pauses, and Smart Pace (word length and complexity).
  */
 export function calculateWordDelayMs(
-  word: HighlightedWordParts,
-  wpm: number,
+  word?: HighlightedWordParts | null,
+  wpm: number = 250,
   smartPause: boolean = true,
   smartPace: boolean = false
 ): number {
-  const baseMs = (60 / Math.max(50, wpm)) * 1000;
+  const baseMs = (60 / Math.max(50, wpm || 250)) * 1000;
+
+  if (!word) {
+    return Math.round(baseMs);
+  }
 
   // 1. Natural punctuation pause multiplier
   let punctuationMultiplier = 1.0;
@@ -552,7 +556,7 @@ export function calculateWordDelayMs(
       punctuationMultiplier = 2.1;
     } else if (word.hasClausePause) {
       punctuationMultiplier = 1.45;
-    } else if (!smartPace && word.original.length > 9) {
+    } else if (!smartPace && word.original && word.original.length > 9) {
       // Baseline length pause fallback when Smart Pace is off
       punctuationMultiplier = 1.2;
     }

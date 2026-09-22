@@ -77,7 +77,7 @@ export function precalculateDriftOffsets(
   for (let i = 0; i < words.length; i++) {
     wordsAtCurrentStation++;
     const word = words[i];
-    const isNaturalBreak = Boolean(word.hasSentenceEnd || word.hasParagraphBreak || word.hasClausePause);
+    const isNaturalBreak = Boolean(word?.hasSentenceEnd || word?.hasParagraphBreak || word?.hasClausePause);
 
     // Natural cadence: shift on punctuation after at least 6 words, or unconditionally after 11 words
     if (wordsAtCurrentStation >= 11 || (wordsAtCurrentStation >= 6 && isNaturalBreak)) {
