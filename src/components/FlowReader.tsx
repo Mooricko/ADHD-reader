@@ -154,6 +154,32 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const activeWord = words.find(w => w && w.index === currentIndex) || (words[currentIndex] && (words[currentIndex].index === undefined || words[currentIndex].index === currentIndex) ? words[currentIndex] : words[0]);
   const activeParagraphIndex = activeWord?.paragraphIndex ?? 0;
 
+  // PART I: Paragraph-level virtualization with modest overscan region
+  const OVERSCAN_PARAGRAPHS = 6;
+  const activeGroupIdx = useMemo(() => {
+    if (paragraphGroups.length === 0) return 0;
+    const idx = paragraphGroups.findIndex((g) => g.paragraphIndex === activeParagraphIndex);
+    return idx >= 0 ? idx : 0;
+  }, [paragraphGroups, activeParagraphIndex]);
+
+  const { visibleGroups, topSpacerHeight, bottomSpacerHeight } = useMemo(() => {
+    if (paragraphGroups.length <= 14) {
+      return {
+        visibleGroups: paragraphGroups,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+      };
+    }
+    const startIdx = Math.max(0, activeGroupIdx - OVERSCAN_PARAGRAPHS);
+    const endIdx = Math.min(paragraphGroups.length, activeGroupIdx + OVERSCAN_PARAGRAPHS + 1);
+    const estimatedParaHeight = 75;
+    return {
+      visibleGroups: paragraphGroups.slice(startIdx, endIdx),
+      topSpacerHeight: startIdx * estimatedParaHeight,
+      bottomSpacerHeight: (paragraphGroups.length - endIdx) * estimatedParaHeight,
+    };
+  }, [paragraphGroups, activeGroupIdx]);
+
   const currentWordAnalysis = useMemo(() => {
     if (!settings.smartPace || !activeWord) return null;
     return analyzeWordSmartPace(activeWord);
@@ -435,7 +461,12 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
               setHoveredParagraphIndex(null);
             }}
           >
-            {paragraphGroups.map((group, groupIdx) => {
+            {/* Top Virtualization Spacer */}
+            {topSpacerHeight > 0 && (
+              <div style={{ height: `${topSpacerHeight}px` }} aria-hidden="true" className="w-full" />
+            )}
+
+            {visibleGroups.map((group, groupIdx) => {
               // Determine if this paragraph is unblurred (Item 3)
               const isParagraphUnblurred =
                 !settings.focusParagraphBlur ||
@@ -459,6 +490,8 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                     const isTarget = item.globalIndex === targetWordIndex;
                     const isAudioCurrent = item.globalIndex === currentIndex;
                     const isPast = item.globalIndex < currentIndex;
+                    const isBionic = settings.highlightStyle === 'bionic-prefix';
+                    const hasWordParts = Boolean(item.word.highlightedText);
 
                     if (isTarget) {
                       return (
@@ -497,13 +530,28 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                             : `${theme.textPrimary} hover:text-white hover:bg-white/5`
                         }`}
                       >
-                        {item.word.original}
+                        {isBionic && hasWordParts ? (
+                          <>
+                            {item.word.prefixPunct}
+                            {item.word.beforeHighlight}
+                            <span className="font-bold text-white opacity-95">{item.word.highlightedText}</span>
+                            {item.word.afterHighlight}
+                            {item.word.suffixPunct}
+                          </>
+                        ) : (
+                          item.word.original
+                        )}
                       </span>
                     );
                   })}
                 </div>
               );
             })}
+
+            {/* Bottom Virtualization Spacer */}
+            {bottomSpacerHeight > 0 && (
+              <div style={{ height: `${bottomSpacerHeight}px` }} aria-hidden="true" className="w-full" />
+            )}
           </div>
         </LayoutGroup>
       </div>

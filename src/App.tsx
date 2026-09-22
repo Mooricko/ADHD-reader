@@ -10,7 +10,11 @@ import {
   SavedDocument, 
   HighlightedWordParts,
   ReaderDocument,
-  InputSourceType
+  InputSourceType,
+  DocumentMetadata,
+  DocumentStructure,
+  DocumentNavigationState,
+  ResolvedDocumentPosition
 } from './types';
 import { SAMPLE_TEXTS } from './data/sampleTexts';
 import { parseTextIntoWords, countWordsFast } from './utils/textParser';
@@ -25,6 +29,8 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ExtensionHubModal } from './components/ExtensionHubModal';
 import { FocusTimerModal } from './components/FocusTimerModal';
 import { ReadingStatsModal } from './components/ReadingStatsModal';
+import { DocumentOverviewModal } from './components/DocumentOverviewModal';
+import { classifyDocumentSize } from './services/structure/documentSizeClassifier';
 import { safeStorage } from './utils/safeStorage';
 import { 
   isChromeExtensionEnvironment, 
@@ -267,12 +273,54 @@ export default function App() {
 
   // 4. Modals and drawers
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
+  const [isOverviewOpen, setIsOverviewOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isExtensionHubOpen, setIsExtensionHubOpen] = useState(false);
   const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  // Phase 6: Active document metadata, structure, and navigation state (PART K)
+  const [activeMetadata, setActiveMetadata] = useState<DocumentMetadata | null>(null);
+  const [activeStructure, setActiveStructure] = useState<DocumentStructure | null>(null);
+  const [navigationState, setNavigationState] = useState<DocumentNavigationState>(() => ({
+    documentId: activeDocId,
+    position: { kind: 'word', wordIndex: currentIndex },
+    viewMode,
+  }));
+
+  // Sync navigation state when activeDocId, currentIndex, or viewMode changes
+  useEffect(() => {
+    setNavigationState((prev) => ({
+      ...prev,
+      documentId: activeDocId,
+      position: { kind: 'word', wordIndex: currentIndex },
+      viewMode,
+    }));
+  }, [activeDocId, currentIndex, viewMode]);
+
+  // Load document metadata and structural index whenever activeDocumentHandle updates
+  useEffect(() => {
+    let isMounted = true;
+    async function syncMetaAndStructure() {
+      try {
+        const [meta, struct] = await Promise.all([
+          activeDocumentHandle.getMetadata().catch(() => null),
+          activeDocumentHandle.getStructure().catch(() => null),
+        ]);
+        if (!isMounted) return;
+        setActiveMetadata(meta);
+        setActiveStructure(struct);
+      } catch (err) {
+        console.warn('Error loading active doc meta/structure:', err);
+      }
+    }
+    syncMetaAndStructure();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeDocumentHandle]);
 
   // 5. Reading Focus Timer & Sessions (Requirement 4 & 5)
   const [timerSecondsRemaining, setTimerSecondsRemaining] = useState<number>(0);
@@ -546,6 +594,18 @@ export default function App() {
         safeStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, '0');
         safeStorage.removeItem(STORAGE_KEYS.CURRENT_TEXT);
 
+        // Phase 6: Large Document Detection (Part A) & Overview Trigger (Part B)
+        const sizeClassification = classifyDocumentSize({
+          totalWords: metadata.totalWords,
+          pageCount: structure?.pages?.length,
+          totalCharacters: metadata.totalCharacters,
+          sourceType: options?.sourceType || 'text',
+        });
+
+        if (sizeClassification.isLargeOrAbove) {
+          setIsOverviewOpen(true);
+        }
+
         // 3. Update lightweight saved docs in React state and localStorage
         setSavedDocs((prev) => {
           const existingIdx = prev.findIndex(
@@ -760,6 +820,34 @@ export default function App() {
     onAutoPause: handleAutoPause,
   });
 
+  // Phase 6: Canonical Navigation Handler across Overview, Minimap, Jump, & Chapters (Part K)
+  const handleNavigateToPosition = useCallback(
+    async (target: ResolvedDocumentPosition | { globalWordIndex: number }) => {
+      const targetIdx = Math.max(0, target.globalWordIndex);
+      handleIndexChange(targetIdx);
+      setIsPlaying(false);
+      try {
+        await activeDocumentHandle.updateProgress(targetIdx);
+        if (activeDocumentHandle.resolveWordIndex) {
+          const resolved = await activeDocumentHandle.resolveWordIndex(targetIdx);
+          setNavigationState({
+            documentId: activeDocId,
+            position: { kind: 'word', wordIndex: targetIdx },
+            resolvedPosition: resolved,
+            viewMode,
+          });
+        }
+      } catch (err) {
+        console.warn('Error updating position in handle:', err);
+      }
+    },
+    [activeDocumentHandle, activeDocId, handleIndexChange, viewMode]
+  );
+
+  const handleStartFromBeginning = useCallback(() => {
+    handleNavigateToPosition({ globalWordIndex: 0 });
+  }, [handleNavigateToPosition]);
+
   const handleTogglePlay = useCallback(() => {
     setIsAutoPaused(false);
     setAutoPauseReason(null);
@@ -856,10 +944,13 @@ export default function App() {
         setIsTimerModalOpen((prev) => !prev);
       } else if (e.key === 'a' || e.key === 'A') {
         setIsStatsModalOpen((prev) => !prev);
+      } else if (e.key === 'o' || e.key === 'O') {
+        setIsOverviewOpen((prev) => !prev);
       } else if (e.key === 'd' || e.key === 'D') {
         handleUpdateSettings({ theme: settings.theme === 'light' ? 'midnight' : 'light' });
       } else if (e.code === 'Escape') {
         setIsTextInputOpen(false);
+        setIsOverviewOpen(false);
         setIsSettingsOpen(false);
         setIsShortcutsOpen(false);
         setIsExtensionHubOpen(false);
@@ -887,7 +978,7 @@ export default function App() {
   const [isIdle, setIsIdle] = useState(false);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const isAnyModalOpen = isTextInputOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen || isTimerModalOpen || isStatsModalOpen;
+  const isAnyModalOpen = isTextInputOpen || isOverviewOpen || isSettingsOpen || isShortcutsOpen || isExtensionHubOpen || isTimerModalOpen || isStatsModalOpen;
 
   const resetIdleTimer = useCallback(() => {
     setIsIdle(false);
@@ -963,6 +1054,7 @@ export default function App() {
           viewMode={viewMode}
           onToggleViewMode={setViewMode}
           onOpenTextInput={() => setIsTextInputOpen(true)}
+          onOpenOverview={() => setIsOverviewOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           onOpenExtensionHub={() => setIsExtensionHubOpen(true)}
@@ -1052,6 +1144,20 @@ export default function App() {
       )}
 
       {/* Modals & Drawers */}
+      {/* Phase 6: Large Document Overview & Navigation Modal */}
+      <DocumentOverviewModal
+        isOpen={isOverviewOpen}
+        onClose={() => setIsOverviewOpen(false)}
+        documentId={activeDocId}
+        handle={activeDocumentHandle}
+        metadata={activeMetadata}
+        structure={activeStructure}
+        currentWordIndex={currentIndex}
+        onNavigateToPosition={handleNavigateToPosition}
+        onStartFromBeginning={handleStartFromBeginning}
+        settings={settings}
+      />
+
       <TextInputModal
         isOpen={isTextInputOpen}
         onClose={() => setIsTextInputOpen(false)}

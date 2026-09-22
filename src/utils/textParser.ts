@@ -277,6 +277,85 @@ export function calculateRtlHighlightRange(
   }
 }
 
+const COMMON_ABBREVIATIONS = new Set([
+  'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'vs', 'etc', 'eg', 'ie', 'al', 'fig', 'figs',
+  'inc', 'corp', 'co', 'ltd', 'approx', 'dept', 'vol', 'vols', 'no', 'nos', 'pp', 'sec',
+  'ch', 'est', 'gen', 'col', 'maj', 'capt', 'lt', 'sgt', 'rev', 'hon', 'st', 'ave', 'rd', 'blvd',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'ibid', 'et'
+]);
+
+/**
+ * Intelligent sentence tokenizer that respects abbreviations, titles, acronyms,
+ * decimal numbers, dialogue quotes, and Unicode terminal punctuation without breaking
+ * sentences prematurely or turning soft line wraps into paragraphs.
+ */
+export function splitIntoSentences(text: string): string[] {
+  if (!text || !text.trim()) return [];
+
+  // Normalize soft line breaks within sentences to single spaces
+  const normalized = text.replace(/([^\n])\r?\n([^\n])/g, '$1 $2').trim();
+
+  // Pattern for sentence delimiters:
+  // [.!?؟。！？]+ followed by optional closing quotes/brackets, then whitespace or end of string
+  const delimiterPattern = /([.!?؟。！？]+)(['"\]}»”’]*)(?:\s+|$)/gu;
+  const sentences: string[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = delimiterPattern.exec(normalized)) !== null) {
+    const punct = match[1];
+    const matchEnd = match.index + match[0].length;
+    const preText = normalized.slice(lastIndex, match.index).trim();
+
+    // Check last word before punctuation
+    const lastWordMatch = preText.match(/([\p{L}\p{N}_]+)$/u);
+    const lastWord = lastWordMatch ? lastWordMatch[1].toLowerCase() : '';
+
+    if (punct.includes('.')) {
+      // Abbreviation guard
+      if (COMMON_ABBREVIATIONS.has(lastWord)) {
+        continue;
+      }
+      // Single letter initial (e.g. 'J.') or acronym (e.g. 'U.S.' or 'D.C.')
+      if (/^[a-z]$/i.test(lastWord) || /[a-z]\.[a-z]$/i.test(preText.slice(Math.max(0, match.index - 4), match.index))) {
+        continue;
+      }
+      // Decimal numbers (e.g. '3.14' or '$5.99')
+      if (/\d$/.test(lastWord) && /^\d/.test(normalized.slice(match.index + 1))) {
+        continue;
+      }
+      // Ellipsis (... followed by lowercase continuation)
+      if (punct.length > 1 && punct.startsWith('..') && matchEnd < normalized.length) {
+        const nextChar = normalized.slice(matchEnd).trim().charAt(0);
+        if (nextChar && nextChar === nextChar.toLowerCase() && nextChar !== nextChar.toUpperCase()) {
+          continue;
+        }
+      }
+    }
+
+    // Lowercase continuation guard: if next non-whitespace char is lowercase, it's not a new sentence
+    const nextChar = normalized.slice(matchEnd).trim().charAt(0);
+    const isNextLower = nextChar && nextChar === nextChar.toLowerCase() && nextChar !== nextChar.toUpperCase();
+    if (isNextLower) {
+      continue;
+    }
+
+    const sentence = normalized.slice(lastIndex, matchEnd).trim();
+    if (sentence.length > 0) {
+      sentences.push(sentence);
+    }
+    lastIndex = matchEnd;
+  }
+
+  const remaining = normalized.slice(lastIndex).trim();
+  if (remaining.length > 0) {
+    sentences.push(remaining);
+  }
+
+  return sentences;
+}
+
 /**
  * Splits text into paragraphs and words, identifying punctuation and calculating
  * the exact middle letters to highlight for RSVP/Bionic reading.
@@ -290,7 +369,7 @@ export function parseTextIntoWords(rawText: string, highlightStyle: HighlightSty
     'parseTextIntoWords',
     () => {
       try {
-        const paragraphs = rawText.split(/\r?\n+/);
+        const paragraphs = rawText.split(/\r?\n\s*\r?\n+/);
         const result: HighlightedWordParts[] = [];
         let globalWordIndex = 0;
 
@@ -338,7 +417,7 @@ export function parseTextIntoWords(rawText: string, highlightStyle: HighlightSty
     (res) => ({
       charCount: rawText.length,
       wordCount: res.length,
-      paragraphCount: rawText.split(/\r?\n+/).length,
+      paragraphCount: rawText.split(/\r?\n\s*\r?\n+/).length,
     })
   );
 }

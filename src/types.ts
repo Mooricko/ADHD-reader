@@ -202,6 +202,8 @@ export interface DocumentChunk {
   wordCount: number;
   startCharIndex?: number;
   endCharIndex?: number;
+  startParagraphIndex?: number;
+  endParagraphIndex?: number;
 }
 
 export interface LocationChunkRange {
@@ -449,4 +451,15 @@ export interface ImportState {
   detectedType?: InputSourceType;
   sourceUrl?: string;
   document?: ReaderDocument;
+}
+
+/**
+ * Phase 6 Document Navigation State (PART K)
+ * Externalizes location state to make it explicit in application state.
+ */
+export interface DocumentNavigationState {
+  documentId: string;
+  position: DocumentPosition;
+  resolvedPosition?: ResolvedDocumentPosition;
+  viewMode: ReaderViewMode;
 }

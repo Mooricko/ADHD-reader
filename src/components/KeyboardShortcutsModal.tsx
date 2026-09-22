@@ -30,6 +30,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     { key: 'R', desc: 'Restart reading from the beginning' },
     { key: 'F', desc: 'Toggle Fullscreen distraction-free mode' },
     { key: 'M', desc: 'Switch between RSVP and Full Text Flow mode' },
+    { key: 'O', desc: 'Open Document Overview, Contents & Minimap' },
     { key: 'T', desc: 'Open Focus Reading Timer' },
     { key: 'A', desc: 'Open Reading Statistics & Analytics (WPM over time)' },
     { key: 'D', desc: 'Toggle Dark / Light Theme mode' },

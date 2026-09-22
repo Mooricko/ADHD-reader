@@ -159,7 +159,11 @@ export class DocumentHandle implements ReaderDocumentHandle {
       text: chunk.text,
       startWordIndex: chunk.startWordIndex,
       highlightStyle,
-      options: { direction },
+      options: {
+        direction,
+        startParagraphIndex: chunk.startParagraphIndex,
+        paragraphs: this.cachedStructure?.paragraphs,
+      },
     });
 
     this.processedWordsCache.set(chunkIndex, processed.words);

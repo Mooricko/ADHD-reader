@@ -6,7 +6,7 @@
  */
 
 import { HighlightStyle, HighlightedWordParts } from '../../types';
-import { splitWordParts, isRtlText, dehyphenateText, countWordsFast } from '../../utils/textParser';
+import { splitWordParts, isRtlText, dehyphenateText, countWordsFast, splitIntoSentences } from '../../utils/textParser';
 import { ChunkReadyMetadata } from './workerProtocol';
 
 export interface ProcessChunkInput {
@@ -18,6 +18,8 @@ export interface ProcessChunkInput {
   options?: {
     direction?: 'ltr' | 'rtl';
     sourceType?: string;
+    startParagraphIndex?: number;
+    paragraphs?: Array<{ startWordIndex: number; endWordIndex: number; paragraphIndex: number }>;
   };
 }
 
@@ -56,11 +58,13 @@ export function processChunkPure(input: ProcessChunkInput): ProcessChunkOutput {
   // 2. Chunk-level RTL detection
   const isChunkRtl = input.options?.direction === 'rtl' || isRtlText(cleanedText);
 
-  // 3. Paragraph splitting
-  const paragraphs = cleanedText.split(/\r?\n+/);
+  // 3. Paragraph splitting using double newlines so soft line breaks do not break paragraphs
+  const paragraphs = cleanedText.split(/\r?\n\s*\r?\n+/);
   const words: HighlightedWordParts[] = [];
   let currentWordIndex = input.startWordIndex;
   let paragraphCount = 0;
+  const baseParagraphIndex = input.options?.startParagraphIndex ?? 0;
+  const structureParagraphs = input.options?.paragraphs;
 
   for (let pIndex = 0; pIndex < paragraphs.length; pIndex++) {
     const paragraph = paragraphs[pIndex];
@@ -76,7 +80,16 @@ export function processChunkPure(input: ProcessChunkInput): ProcessChunkOutput {
 
       // Tokenization & Highlighted letters calculation (reusing splitWordParts)
       const parsedWord = splitWordParts(token, input.highlightStyle, currentWordIndex);
-      parsedWord.paragraphIndex = pIndex;
+      
+      // Determine global paragraph index: prioritize structure index if available, else continuous base offset
+      if (structureParagraphs && structureParagraphs.length > 0) {
+        const found = structureParagraphs.find(
+          (sp) => currentWordIndex >= sp.startWordIndex && currentWordIndex <= sp.endWordIndex
+        );
+        parsedWord.paragraphIndex = found ? found.paragraphIndex : baseParagraphIndex + pIndex;
+      } else {
+        parsedWord.paragraphIndex = baseParagraphIndex + pIndex;
+      }
 
       // Inherit chunk direction if word didn't explicitly trigger individual RTL
       if (isChunkRtl && !parsedWord.isRtl) {
@@ -111,9 +124,15 @@ export function processChunkPure(input: ProcessChunkInput): ProcessChunkOutput {
   };
 }
 
+interface WorkerParagraphSegment {
+  paragraphIndex: number;
+  sentences: string[];
+}
+
 /**
  * Splits a full text into bounded chunks suitable for worker processing.
  * Respects paragraph boundaries and target word counts (e.g. 2,000–5,000 words).
+ * Sentences within an oversized paragraph are joined with ' ' (not '\n\n').
  */
 export function createWorkerChunks(
   text: string,
@@ -123,79 +142,19 @@ export function createWorkerChunks(
     return [{ chunkIndex: 0, text: '', startWordIndex: 0, wordCount: 0 }];
   }
 
-  const paragraphs = text.split(/\n\s*\n/);
+  const paragraphs = text.split(/\r?\n\s*\r?\n+/);
   const chunks: Array<{ chunkIndex: number; text: string; startWordIndex: number; wordCount: number }> = [];
   const minChunkThreshold = Math.min(500, Math.max(1, Math.floor(targetChunkWords * 0.75)));
-  let currentChunkParagraphs: string[] = [];
+  let currentSegments: WorkerParagraphSegment[] = [];
   let currentChunkWords = 0;
   let globalWordIndex = 0;
   let currentChunkStartWord = 0;
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    const para = paragraphs[i];
-    const paraWords = countWordsFast(para);
-
-    // If single paragraph is oversized (> targetChunkWords * 1.5), split into sentences
-    if (paraWords > targetChunkWords * 1.5) {
-      if (currentChunkParagraphs.length > 0) {
-        const chunkText = currentChunkParagraphs.join('\n\n');
-        const count = countWordsFast(chunkText);
-        chunks.push({
-          chunkIndex: chunks.length,
-          text: chunkText,
-          startWordIndex: currentChunkStartWord,
-          wordCount: count,
-        });
-        currentChunkParagraphs = [];
-        currentChunkWords = 0;
-        currentChunkStartWord = globalWordIndex;
-      }
-
-      const sentences = para.match(/([^.!?\n]+[.!?]+(?:\s+|$)|[^\n]+(?:\n|$))/g) || [para];
-      for (const sent of sentences) {
-        const sentWords = countWordsFast(sent);
-        if (currentChunkWords + sentWords > targetChunkWords && currentChunkWords >= minChunkThreshold) {
-          const chunkText = currentChunkParagraphs.join(' ');
-          const count = countWordsFast(chunkText);
-          chunks.push({
-            chunkIndex: chunks.length,
-            text: chunkText,
-            startWordIndex: currentChunkStartWord,
-            wordCount: count,
-          });
-          currentChunkParagraphs = [];
-          currentChunkWords = 0;
-          currentChunkStartWord = globalWordIndex;
-        }
-        currentChunkParagraphs.push(sent.trim());
-        currentChunkWords += sentWords;
-        globalWordIndex += sentWords;
-      }
-      continue;
-    }
-
-    if (currentChunkWords + paraWords > targetChunkWords && currentChunkWords >= minChunkThreshold) {
-      const chunkText = currentChunkParagraphs.join('\n\n');
-      const count = countWordsFast(chunkText);
-      chunks.push({
-        chunkIndex: chunks.length,
-        text: chunkText,
-        startWordIndex: currentChunkStartWord,
-        wordCount: count,
-      });
-      currentChunkParagraphs = [para];
-      currentChunkWords = paraWords;
-      currentChunkStartWord = globalWordIndex;
-    } else {
-      currentChunkParagraphs.push(para);
-      currentChunkWords += paraWords;
-    }
-
-    globalWordIndex += paraWords;
-  }
-
-  if (currentChunkParagraphs.length > 0) {
-    const chunkText = currentChunkParagraphs.join('\n\n');
+  const flushChunk = () => {
+    if (currentSegments.length === 0) return;
+    const chunkText = currentSegments
+      .map((seg) => seg.sentences.join(' '))
+      .join('\n\n');
     const count = countWordsFast(chunkText);
     chunks.push({
       chunkIndex: chunks.length,
@@ -203,7 +162,49 @@ export function createWorkerChunks(
       startWordIndex: currentChunkStartWord,
       wordCount: count,
     });
+    currentSegments = [];
+    currentChunkWords = 0;
+    currentChunkStartWord = globalWordIndex;
+  };
+
+  const addSentence = (pIndex: number, sentenceText: string, words: number) => {
+    const lastSeg = currentSegments[currentSegments.length - 1];
+    if (lastSeg && lastSeg.paragraphIndex === pIndex) {
+      lastSeg.sentences.push(sentenceText);
+    } else {
+      currentSegments.push({ paragraphIndex: pIndex, sentences: [sentenceText] });
+    }
+    currentChunkWords += words;
+    globalWordIndex += words;
+  };
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const rawPara = paragraphs[i];
+    const para = rawPara.trim();
+    if (!para) continue;
+
+    const paraWords = countWordsFast(para);
+
+    // If single paragraph is oversized (> targetChunkWords * 1.5), split into sentences
+    if (paraWords > targetChunkWords * 1.5) {
+      const sentences = splitIntoSentences(para);
+      for (const sent of sentences) {
+        const sentWords = countWordsFast(sent);
+        if (currentChunkWords + sentWords > targetChunkWords && currentChunkWords >= minChunkThreshold) {
+          flushChunk();
+        }
+        addSentence(i, sent, sentWords);
+      }
+      continue;
+    }
+
+    if (currentChunkWords + paraWords > targetChunkWords && currentChunkWords >= minChunkThreshold) {
+      flushChunk();
+    }
+    addSentence(i, para, paraWords);
   }
+
+  flushChunk();
 
   return chunks;
 }
