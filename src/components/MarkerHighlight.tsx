@@ -84,6 +84,10 @@ export const MarkerHighlight = React.forwardRef<HTMLSpanElement, MarkerHighlight
         title={title}
         dir={isRtl ? 'rtl' : 'ltr'}
         className={`relative inline-block align-baseline px-1.5 py-0.5 mx-[1px] cursor-pointer select-text rounded-lg transition-colors duration-150 ${className}`}
+        style={{
+          position: 'relative',
+          lineHeight: '1.2',
+        }}
         {...rest}
       >
         {before && <span className="mr-0.5">{before}</span>}
@@ -102,8 +106,17 @@ export const MarkerHighlight = React.forwardRef<HTMLSpanElement, MarkerHighlight
               stiffness: 400,
               damping: 30,
             }}
-            className="absolute inset-0 rounded-lg pointer-events-none"
+            className="absolute inset-0 rounded-lg pointer-events-none [will-change:transform]"
             style={{
+              position: 'absolute',
+              willChange: 'transform',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100%',
+              height: '100%',
+              transform: 'translateZ(0)',
               borderRadius: '8px',
               border: `1px solid ${borderRgba}`,
               // Vertical linear gradient along the Y axis from 100% opacity to 0% opacity

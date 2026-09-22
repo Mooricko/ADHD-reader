@@ -655,11 +655,12 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                     paragraphRefs.current[group.paragraphIndex] = el;
                   }}
                   onMouseEnter={() => setHoveredParagraphIndex(group.paragraphIndex)}
-                  className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed ${
+                  className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed relative ${
                     isParagraphUnblurred
                       ? 'opacity-100 blur-0'
                       : 'opacity-25 blur-[5px] select-none pointer-events-auto'
                   }`}
+                  style={{ position: 'relative' }}
                 >
                   {group.words.map((item) => {
                     const isTarget = item.globalIndex === targetWordIndex;
@@ -681,26 +682,31 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                     );
 
                     return (
-                      <MarkerHighlight
+                      <span
                         key={`w-${item.globalIndex}`}
-                        ref={isAudioCurrent ? activeWordRef : null}
-                        highlight={wordContent}
-                        markerColor={highlight.hex}
-                        isRtl={Boolean(item.word.isRtl)}
-                        isActive={isTarget}
-                        isHovered={hoveredWordIndex === item.globalIndex}
-                        onClick={() => onIndexChange(item.globalIndex)}
-                        onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
-                        onMouseLeave={() =>
-                          setHoveredWordIndex((prev) => (prev === item.globalIndex ? null : prev))
-                        }
-                        title={`Word #${item.globalIndex + 1}: Click to start reading here`}
-                        className={`${
-                          isPast && isPlaying
-                            ? 'opacity-70 hover:opacity-100'
-                            : `${theme.textPrimary} hover:text-white hover:bg-white/5`
-                        }`}
-                      />
+                        className="relative inline-block align-baseline"
+                        style={{ position: 'relative' }}
+                      >
+                        <MarkerHighlight
+                          ref={isAudioCurrent ? activeWordRef : null}
+                          highlight={wordContent}
+                          markerColor={highlight.hex}
+                          isRtl={Boolean(item.word.isRtl)}
+                          isActive={isTarget}
+                          isHovered={hoveredWordIndex === item.globalIndex}
+                          onClick={() => onIndexChange(item.globalIndex)}
+                          onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
+                          onMouseLeave={() =>
+                            setHoveredWordIndex((prev) => (prev === item.globalIndex ? null : prev))
+                          }
+                          title={`Word #${item.globalIndex + 1}: Click to start reading here`}
+                          className={`${
+                            isPast && isPlaying
+                              ? 'opacity-70 hover:opacity-100'
+                              : `${theme.textPrimary} hover:text-white hover:bg-white/5`
+                          }`}
+                        />
+                      </span>
                     );
                   })}
                 </div>
