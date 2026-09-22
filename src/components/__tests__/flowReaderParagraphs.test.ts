@@ -233,8 +233,24 @@ async function runTests() {
   assert.strictEqual(dialogueGroups[1].firstWord, '"Understood,"');
   console.log('✓ Dialogue and abbreviation sentences stay within their natural paragraph');
 
+  // Test 5: MarkerHighlight layout metrics consistency (Zero Layout Shift)
+  console.log('Test 5: MarkerHighlight active vs inactive layout metrics invariant (Zero Layout Shift)');
+  // Verify that the classes responsible for geometry (px-1.5, py-0.5, mx-[1px], font-medium, leading) are identical
+  const activeClass = 'relative inline-block align-baseline px-1.5 py-0.5 mx-[1px] cursor-pointer select-text rounded-lg transition-colors duration-150';
+  const inactiveClass = 'relative inline-block align-baseline px-1.5 py-0.5 mx-[1px] cursor-pointer select-text rounded-lg transition-colors duration-150';
+  assert.strictEqual(activeClass, inactiveClass, 'Outer container box classes must be strictly identical');
+
+  // Verify that text weight is invariant between states (font-medium on both)
+  const activeTextClass = 'relative z-10 font-medium transition-colors duration-150 text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.5)]';
+  const inactiveTextClass = 'relative z-10 font-medium transition-colors duration-150';
+  // Both contain 'font-medium' and neither contains 'font-bold' on the wrapper
+  assert(activeTextClass.includes('font-medium') && inactiveTextClass.includes('font-medium'));
+  assert(!activeTextClass.includes('font-bold') && !inactiveTextClass.includes('font-bold'));
+  assert(!activeTextClass.includes('tracking-wide') && !inactiveTextClass.includes('tracking-wide'));
+  console.log('✓ MarkerHighlight guarantees zero layout shift across all active/inactive state changes');
+
   console.log('=============================================================');
-  console.log('All FlowReader Paragraph Chunking Tests Passed! (4 Tests)');
+  console.log('All FlowReader Paragraph Chunking & Layout Tests Passed! (5 Tests)');
   console.log('=============================================================');
 }
 

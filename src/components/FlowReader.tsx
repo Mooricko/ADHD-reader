@@ -668,55 +668,39 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                     const isBionic = settings.highlightStyle === 'bionic-prefix';
                     const hasWordParts = Boolean(item.word.highlightedText);
 
-                    if (isTarget) {
-                      return (
-                        <span
-                          key={`w-${item.globalIndex}`}
-                          ref={isAudioCurrent ? activeWordRef : null}
-                          onClick={() => onIndexChange(item.globalIndex)}
-                          onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
-                          title={`Word #${item.globalIndex + 1}: Click to start reading here`}
-                          dir={item.word.isRtl ? 'rtl' : 'ltr'}
-                          className="inline-block cursor-pointer align-baseline mx-[1px]"
-                        >
-                          {/* Marker Highlight Floating Pill (Gradient Oval with Smooth Animated Transition) */}
-                          <MarkerHighlight
-                            highlight={item.word.original}
-                            markerColor={highlight.hex}
-                            isRtl={Boolean(item.word.isRtl)}
-                            isActive={true}
-                            className="font-bold"
-                          />
-                        </span>
-                      );
-                    }
+                    const wordContent = isBionic && hasWordParts ? (
+                      <>
+                        {item.word.prefixPunct}
+                        {item.word.beforeHighlight}
+                        <span className="font-bold text-white opacity-95">{item.word.highlightedText}</span>
+                        {item.word.afterHighlight}
+                        {item.word.suffixPunct}
+                      </>
+                    ) : (
+                      item.word.original
+                    );
 
                     return (
-                      <span
+                      <MarkerHighlight
                         key={`w-${item.globalIndex}`}
                         ref={isAudioCurrent ? activeWordRef : null}
+                        highlight={wordContent}
+                        markerColor={highlight.hex}
+                        isRtl={Boolean(item.word.isRtl)}
+                        isActive={isTarget}
+                        isHovered={hoveredWordIndex === item.globalIndex}
                         onClick={() => onIndexChange(item.globalIndex)}
                         onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
+                        onMouseLeave={() =>
+                          setHoveredWordIndex((prev) => (prev === item.globalIndex ? null : prev))
+                        }
                         title={`Word #${item.globalIndex + 1}: Click to start reading here`}
-                        dir={item.word.isRtl ? 'rtl' : 'ltr'}
-                        className={`inline-block cursor-pointer px-1 py-0.5 rounded transition-all align-baseline ${
+                        className={`${
                           isPast && isPlaying
                             ? 'opacity-70 hover:opacity-100'
                             : `${theme.textPrimary} hover:text-white hover:bg-white/5`
                         }`}
-                      >
-                        {isBionic && hasWordParts ? (
-                          <>
-                            {item.word.prefixPunct}
-                            {item.word.beforeHighlight}
-                            <span className="font-bold text-white opacity-95">{item.word.highlightedText}</span>
-                            {item.word.afterHighlight}
-                            {item.word.suffixPunct}
-                          </>
-                        ) : (
-                          item.word.original
-                        )}
-                      </span>
+                      />
                     );
                   })}
                 </div>
