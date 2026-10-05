@@ -116,8 +116,21 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Hover tracking for floating highlighter pillow and paragraph focus
+  // Retains the last hovered word/paragraph when the cursor leaves until it gets the cursor again or playback advances
   const [hoveredWordIndex, setHoveredWordIndex] = useState<number | null>(null);
   const [hoveredParagraphIndex, setHoveredParagraphIndex] = useState<number | null>(null);
+
+  const handleWordHover = useCallback((wordIdx: number, paragraphIdx?: number) => {
+    setHoveredWordIndex((prev) => (prev === wordIdx ? prev : wordIdx));
+    if (paragraphIdx !== undefined) {
+      setHoveredParagraphIndex((prev) => (prev === paragraphIdx ? prev : paragraphIdx));
+    }
+  }, []);
+
+  useEffect(() => {
+    setHoveredWordIndex(null);
+    setHoveredParagraphIndex(null);
+  }, [currentIndex, isPlaying]);
 
   // Document-level natural paragraph structure loaded from handle (double newline pre-processing)
   const [docParagraphs, setDocParagraphs] = useState<ParagraphIndexEntry[] | null>(null);
@@ -609,10 +622,6 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
       <div 
         ref={containerRef}
         id="flow-text-container"
-        onMouseLeave={() => {
-          setHoveredWordIndex(null);
-          setHoveredParagraphIndex(null);
-        }}
         className={`flex-1 min-h-0 overflow-y-auto px-2 sm:px-6 py-4 sm:py-8 select-text leading-relaxed relative ${font.className} scroll-smooth`}
         style={{
           fontSize: `${settings.flowFontSize || 22}px`,
@@ -631,10 +640,6 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
           <div 
             className={`max-w-3xl mx-auto relative z-10 ${isTextRtl && settings.fontFamily !== 'vazirmatn' ? 'font-vazirmatn' : ''}`}
             dir={isTextRtl ? 'rtl' : 'ltr'}
-            onMouseLeave={() => {
-              setHoveredWordIndex(null);
-              setHoveredParagraphIndex(null);
-            }}
           >
             {/* Top Virtualization Spacer */}
             {topSpacerHeight > 0 && (
@@ -654,7 +659,11 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                   ref={(el) => {
                     paragraphRefs.current[group.paragraphIndex] = el;
                   }}
-                  onMouseEnter={() => setHoveredParagraphIndex(group.paragraphIndex)}
+                  onMouseEnter={() =>
+                    setHoveredParagraphIndex((prev) =>
+                      prev === group.paragraphIndex ? prev : group.paragraphIndex
+                    )
+                  }
                   className={`my-4 sm:my-6 transition-all duration-300 leading-relaxed relative ${
                     isParagraphUnblurred
                       ? 'opacity-100 blur-0'
@@ -669,44 +678,27 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
                     const isBionic = settings.highlightStyle === 'bionic-prefix';
                     const hasWordParts = Boolean(item.word.highlightedText);
 
-                    const wordContent = isBionic && hasWordParts ? (
-                      <>
-                        {item.word.prefixPunct}
-                        {item.word.beforeHighlight}
-                        <span className="font-bold text-white opacity-95">{item.word.highlightedText}</span>
-                        {item.word.afterHighlight}
-                        {item.word.suffixPunct}
-                      </>
-                    ) : (
-                      item.word.original
-                    );
-
                     return (
-                      <span
+                      <MarkerHighlight
                         key={`w-${item.globalIndex}`}
-                        className="relative inline-block align-baseline"
-                        style={{ position: 'relative' }}
-                      >
-                        <MarkerHighlight
-                          ref={isAudioCurrent ? activeWordRef : null}
-                          highlight={wordContent}
-                          markerColor={highlight.hex}
-                          isRtl={Boolean(item.word.isRtl)}
-                          isActive={isTarget}
-                          isHovered={hoveredWordIndex === item.globalIndex}
-                          onClick={() => onIndexChange(item.globalIndex)}
-                          onMouseEnter={() => setHoveredWordIndex(item.globalIndex)}
-                          onMouseLeave={() =>
-                            setHoveredWordIndex((prev) => (prev === item.globalIndex ? null : prev))
-                          }
-                          title={`Word #${item.globalIndex + 1}: Click to start reading here`}
-                          className={`${
-                            isPast && isPlaying
-                              ? 'opacity-70 hover:opacity-100'
-                              : `${theme.textPrimary} hover:text-white hover:bg-white/5`
-                          }`}
-                        />
-                      </span>
+                        ref={isAudioCurrent ? activeWordRef : null}
+                        highlight={item.word.original}
+                        wordParts={isBionic && hasWordParts ? item.word : undefined}
+                        markerColor={highlight.hex}
+                        isRtl={Boolean(item.word.isRtl)}
+                        isActive={isTarget}
+                        isHovered={hoveredWordIndex === item.globalIndex}
+                        wordIndex={item.globalIndex}
+                        paragraphIndex={group.paragraphIndex}
+                        onWordSelect={onIndexChange}
+                        onWordHover={handleWordHover}
+                        title={`Word #${item.globalIndex + 1}: Click to start reading here`}
+                        className={`${
+                          isPast && isPlaying
+                            ? 'opacity-70 hover:opacity-100'
+                            : `${theme.textPrimary} hover:text-white hover:bg-white/5`
+                        }`}
+                      />
                     );
                   })}
                 </div>
