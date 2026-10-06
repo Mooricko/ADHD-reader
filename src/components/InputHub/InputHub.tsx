@@ -35,6 +35,8 @@ interface InputHubProps {
   settings: ReaderSettings;
   onClose?: () => void;
   onOpenExtensionHub?: () => void;
+  initialDroppedFile?: File | null;
+  onClearDroppedFile?: () => void;
 }
 
 export const InputHub: React.FC<InputHubProps> = ({
@@ -46,6 +48,8 @@ export const InputHub: React.FC<InputHubProps> = ({
   settings,
   onClose,
   onOpenExtensionHub,
+  initialDroppedFile,
+  onClearDroppedFile,
 }) => {
   const [activeTab, setActiveTab] = useState<'hub' | 'samples' | 'history'>('hub');
   const [pastedText, setPastedText] = useState(currentText);
@@ -225,6 +229,15 @@ export const InputHub: React.FC<InputHubProps> = ({
     setLastAttemptedUrl(null);
     handleProcessInput(file, undefined, file.name);
   };
+
+  // Automatically process file dropped on the global window drag overlay
+  useEffect(() => {
+    if (initialDroppedFile) {
+      const fileToProcess = initialDroppedFile;
+      onClearDroppedFile?.();
+      handleFileSelect(fileToProcess);
+    }
+  }, [initialDroppedFile]);
 
   // URL submitted from URL input or detected
   const handleImportUrl = (url: string, preloadedDoc?: ReaderDocument) => {

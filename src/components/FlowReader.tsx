@@ -11,7 +11,7 @@ import {
   Flame
 } from 'lucide-react';
 import { HighlightedWordParts, ReaderSettings, ReadingHeatmapData, WarmupStatus } from '../types';
-import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS } from '../utils/themeStyles';
+import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS, resolveLetterSpacingEm } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { analyzeWordSmartPace } from '../utils/smartPacing';
 import { metronome } from '../utils/audioMetronome';
@@ -626,7 +626,7 @@ export const FlowReader: React.FC<FlowReaderProps> = ({
         style={{
           fontSize: `${settings.flowFontSize || 22}px`,
           lineHeight: settings.lineHeight || 1.8,
-          letterSpacing: `${settings.letterSpacing || 0.02}em`,
+          letterSpacing: `${resolveLetterSpacingEm(settings)}em`,
         }}
       >
         {/* Ambient Glow Focus Halo (Matching RSVP background) */}

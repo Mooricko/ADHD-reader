@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, FileText, AlertCircle } from 'lucide-react';
 import { HIGHLIGHT_COLORS } from '../../utils/themeStyles';
 import { HighlightColor } from '../../types';
@@ -19,20 +19,76 @@ export const DropZone: React.FC<DropZoneProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [dragError, setDragError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragWatchdogRef = useRef<NodeJS.Timeout | null>(null);
   const highlight = HIGHLIGHT_COLORS[highlightColor] || HIGHLIGHT_COLORS.red;
+
+  const clearDragOver = useCallback(() => {
+    if (dragWatchdogRef.current) {
+      clearTimeout(dragWatchdogRef.current);
+      dragWatchdogRef.current = null;
+    }
+    setIsDragOver(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragOver) return;
+
+    const handleGlobalEnd = () => {
+      clearDragOver();
+    };
+
+    window.addEventListener('drop', handleGlobalEnd, { capture: true });
+    window.addEventListener('dragend', handleGlobalEnd, { capture: true });
+    window.addEventListener('mousemove', handleGlobalEnd, { capture: true });
+    window.addEventListener('blur', handleGlobalEnd);
+
+    return () => {
+      window.removeEventListener('drop', handleGlobalEnd, { capture: true });
+      window.removeEventListener('dragend', handleGlobalEnd, { capture: true });
+      window.removeEventListener('mousemove', handleGlobalEnd, { capture: true });
+      window.removeEventListener('blur', handleGlobalEnd);
+    };
+  }, [isDragOver, clearDragOver]);
+
+  useEffect(() => {
+    return () => {
+      if (dragWatchdogRef.current) {
+        clearTimeout(dragWatchdogRef.current);
+      }
+    };
+  }, []);
+
+  const scheduleWatchdog = () => {
+    if (dragWatchdogRef.current) {
+      clearTimeout(dragWatchdogRef.current);
+    }
+    dragWatchdogRef.current = setTimeout(() => {
+      setIsDragOver(false);
+    }, 200);
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (disabled) return;
+    setIsDragOver(true);
+    scheduleWatchdog();
+  };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation();
     if (disabled) return;
-    setIsDragOver(true);
+    if (!isDragOver) {
+      setIsDragOver(true);
+    }
+    scheduleWatchdog();
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    setDragError(null);
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      clearDragOver();
+      setDragError(null);
+    }
   };
 
   const validateFile = (file: File): boolean => {
@@ -49,8 +105,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
+    clearDragOver();
     if (disabled) return;
 
     const files = e.dataTransfer.files;
@@ -80,6 +135,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
     <div className="w-full">
       <div
         id="universal-dropzone"
+        onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -100,25 +156,25 @@ export const DropZone: React.FC<DropZoneProps> = ({
         />
 
         <div
-          className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-110 ${
+          className={`pointer-events-none w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-110 ${
             isDragOver ? 'bg-red-500 text-white animate-bounce' : 'bg-slate-800 text-slate-300 border border-slate-700'
           }`}
         >
           {isDragOver ? <FileText className="w-7 h-7" /> : <Upload className="w-7 h-7" />}
         </div>
 
-        <h3 className="text-base sm:text-lg font-semibold text-slate-200 mb-1">
+        <h3 className="pointer-events-none text-base sm:text-lg font-semibold text-slate-200 mb-1">
           {isDragOver ? 'Release to import' : 'Drop something to read'}
         </h3>
 
-        <p className="text-xs sm:text-sm text-slate-400 max-w-sm mb-3">
+        <p className="pointer-events-none text-xs sm:text-sm text-slate-400 max-w-sm mb-3">
           Drag & drop files here or{' '}
           <span className={`font-medium underline underline-offset-2 ${highlight.textClass}`}>
             choose from your device
           </span>
         </p>
 
-        <div className="flex items-center gap-2 text-[11px] font-mono tracking-wider text-slate-400 uppercase bg-slate-900/60 px-3 py-1 rounded-full border border-slate-800">
+        <div className="pointer-events-none flex items-center gap-2 text-[11px] font-mono tracking-wider text-slate-400 uppercase bg-slate-900/60 px-3 py-1 rounded-full border border-slate-800">
           <span>TXT</span>
           <span className="text-slate-600">•</span>
           <span>MD</span>
@@ -138,3 +194,4 @@ export const DropZone: React.FC<DropZoneProps> = ({
     </div>
   );
 };
+

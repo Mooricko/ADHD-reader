@@ -16,6 +16,8 @@ interface TextInputModalProps {
   onDeleteDocument?: (id: string) => void;
   onOpenExtensionHub?: () => void;
   settings: ReaderSettings;
+  initialDroppedFile?: File | null;
+  onClearDroppedFile?: () => void;
 }
 
 export const TextInputModal: React.FC<TextInputModalProps> = ({
@@ -29,6 +31,8 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
   onDeleteDocument,
   onOpenExtensionHub,
   settings,
+  initialDroppedFile,
+  onClearDroppedFile,
 }) => {
   if (!isOpen) return null;
 
@@ -91,6 +95,8 @@ export const TextInputModal: React.FC<TextInputModalProps> = ({
             settings={settings}
             onClose={onClose}
             onOpenExtensionHub={onOpenExtensionHub}
+            initialDroppedFile={initialDroppedFile}
+            onClearDroppedFile={onClearDroppedFile}
           />
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useEffect, useRef, useState } from 'react';
 import { HighlightedWordParts, ReaderSettings } from '../types';
-import { ThemeConfig } from '../utils/themeStyles';
+import { ThemeConfig, resolveLetterSpacingEm } from '../utils/themeStyles';
 import { calculateWordDelayMs } from '../utils/textParser';
 import { SvgFilters } from './MorphingText';
 import { HorizontalRSVPReel } from './HorizontalRSVPReel';
@@ -138,6 +138,8 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
     settings.morphTransition,
     settings.opticalCenterLock,
     settings.fontSize,
+    settings.letterSpacing,
+    settings.letterSpacingPreset,
     currentWord.original,
     currentWord.beforeHighlight,
     currentWord.highlightedText,
@@ -300,6 +302,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
         style={{
           fontSize: `${settings.fontSize}px`,
           lineHeight: 1.2,
+          letterSpacing: `${resolveLetterSpacingEm(settings)}em`,
         }}
       >
         <div
@@ -343,6 +346,7 @@ export const RSVPMorphWord: React.FC<RSVPMorphWordProps> = ({
         style={{
           fontSize: `${settings.fontSize}px`,
           lineHeight: 1.2,
+          letterSpacing: `${resolveLetterSpacingEm(settings)}em`,
           filter: 'url(#threshold) blur(0.6px)',
         }}
       >

@@ -1,4 +1,62 @@
-import { FontFamily, HighlightColor, ThemeId } from '../types';
+import { FontFamily, HighlightColor, LetterSpacingPreset, ThemeId } from '../types';
+
+export const LETTER_SPACING_PRESETS: Record<
+  LetterSpacingPreset,
+  {
+    name: string;
+    description: string;
+    valueEm: number;
+  }
+> = {
+  compact: {
+    name: 'Compact',
+    description: 'Tighter character tracking (0em)',
+    valueEm: 0,
+  },
+  comfortable: {
+    name: 'Comfortable',
+    description: 'Balanced reading tracking (0.02em)',
+    valueEm: 0.02,
+  },
+  generous: {
+    name: 'Generous',
+    description: 'Wide dyslexia-friendly tracking (0.06em)',
+    valueEm: 0.06,
+  },
+};
+
+export function resolveLetterSpacingPreset(settings?: {
+  letterSpacingPreset?: LetterSpacingPreset;
+  letterSpacing?: number;
+}): LetterSpacingPreset {
+  if (
+    settings?.letterSpacingPreset &&
+    settings.letterSpacingPreset in LETTER_SPACING_PRESETS
+  ) {
+    return settings.letterSpacingPreset;
+  }
+  if (typeof settings?.letterSpacing === 'number' && !isNaN(settings.letterSpacing)) {
+    if (settings.letterSpacing <= 0.005) return 'compact';
+    if (settings.letterSpacing >= 0.04) return 'generous';
+  }
+  return 'comfortable';
+}
+
+export function resolveLetterSpacingEm(settings?: {
+  letterSpacingPreset?: LetterSpacingPreset;
+  letterSpacing?: number;
+}): number {
+  if (
+    settings?.letterSpacingPreset &&
+    settings.letterSpacingPreset in LETTER_SPACING_PRESETS
+  ) {
+    return LETTER_SPACING_PRESETS[settings.letterSpacingPreset].valueEm;
+  }
+  if (typeof settings?.letterSpacing === 'number' && !isNaN(settings.letterSpacing)) {
+    return settings.letterSpacing;
+  }
+  return LETTER_SPACING_PRESETS.comfortable.valueEm;
+}
 
 export type ThemeConfig = {
   name: string;

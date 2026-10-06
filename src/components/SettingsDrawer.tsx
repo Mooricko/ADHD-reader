@@ -30,12 +30,15 @@ import {
   HighlightStyle, 
   ThemeId, 
   FontFamily,
+  LetterSpacingPreset,
   WarmupStatus
 } from '../types';
 import { 
   THEME_CONFIGS, 
   HIGHLIGHT_COLORS, 
-  FONT_CONFIGS 
+  FONT_CONFIGS,
+  LETTER_SPACING_PRESETS,
+  resolveLetterSpacingPreset
 } from '../utils/themeStyles';
 import { speechNarrator, VoiceOption } from '../utils/speechNarration';
 import { DRIFT_INTENSITY_CONFIGS, DriftIntensity } from '../utils/driftAnimation';
@@ -367,6 +370,60 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-red-500"
               />
             </div>
+
+            {/* Letter-Spacing Presets Toggle ('compact' | 'comfortable' | 'generous') */}
+            {(() => {
+              const activeLetterSpacingPreset = resolveLetterSpacingPreset(settings);
+              return (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className={`font-bold uppercase tracking-wider ${theme.textMuted}`}>
+                      Letter Spacing Preset
+                    </span>
+                    <span className={`font-mono font-bold capitalize ${theme.textPrimary}`}>
+                      {activeLetterSpacingPreset} ({LETTER_SPACING_PRESETS[activeLetterSpacingPreset].valueEm}em)
+                    </span>
+                  </div>
+                  <div
+                    id="letter-spacing-preset-toggle"
+                    role="group"
+                    aria-label="Letter spacing presets"
+                    className={`grid grid-cols-3 p-1 rounded-xl border ${theme.borderClass} ${theme.accentSurface} gap-1`}
+                  >
+                    {(['compact', 'comfortable', 'generous'] as LetterSpacingPreset[]).map((presetKey) => {
+                      const preset = LETTER_SPACING_PRESETS[presetKey];
+                      const isSelected = activeLetterSpacingPreset === presetKey;
+                      return (
+                        <button
+                          key={presetKey}
+                          id={`letter-spacing-${presetKey}-btn`}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() =>
+                            onUpdateSettings({
+                              letterSpacingPreset: presetKey,
+                              letterSpacing: preset.valueEm,
+                            })
+                          }
+                          className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            isSelected
+                              ? 'text-white shadow-xs'
+                              : `${theme.textMuted} hover:${theme.textPrimary}`
+                          }`}
+                          style={isSelected ? { backgroundColor: highlight.hex } : undefined}
+                          title={preset.description}
+                        >
+                          <span className="font-bold capitalize">{preset.name}</span>
+                          <span className="text-[10px] opacity-80 font-mono">
+                            {preset.valueEm === 0 ? '0em' : `+${preset.valueEm}em`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* 6. Focus & Optical Alignment Controls */}

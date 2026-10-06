@@ -8,6 +8,8 @@ export type FontFamily = 'lexend' | 'atkinson' | 'jetbrains' | 'newsreader' | 'j
 
 export type ReaderViewMode = 'rsvp' | 'flow';
 
+export type LetterSpacingPreset = 'compact' | 'comfortable' | 'generous';
+
 export interface HighlightedWordParts {
   original: string;
   prefixPunct: string;
@@ -34,6 +36,7 @@ export interface ReaderSettings {
   flowFontSize: number;
   lineHeight: number;
   letterSpacing: number;
+  letterSpacingPreset?: LetterSpacingPreset;
   focusParagraphBlur: boolean; // Optional feature that blurs text and unblurs active/hovered paragraph
   smartPunctuationPause: boolean;
   metronomeSound: boolean;

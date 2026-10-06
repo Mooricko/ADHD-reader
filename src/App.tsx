@@ -19,7 +19,14 @@ import {
 import { SAMPLE_TEXTS } from './data/sampleTexts';
 import { parseTextIntoWords, countWordsFast } from './utils/textParser';
 import { logDevDiagnostic } from './utils/performanceDiagnostics';
-import { THEME_CONFIGS, HIGHLIGHT_COLORS, FONT_CONFIGS, getTheme } from './utils/themeStyles';
+import { 
+  THEME_CONFIGS, 
+  HIGHLIGHT_COLORS, 
+  FONT_CONFIGS, 
+  getTheme,
+  resolveLetterSpacingPreset,
+  resolveLetterSpacingEm
+} from './utils/themeStyles';
 import { Header } from './components/Header';
 import { RSVPReader } from './components/RSVPReader';
 import { FlowReader } from './components/FlowReader';
@@ -58,6 +65,7 @@ const DEFAULT_SETTINGS: ReaderSettings = {
   flowFontSize: 22,
   lineHeight: 1.8,
   letterSpacing: 0.02,
+  letterSpacingPreset: 'comfortable',
   focusParagraphBlur: false,
   smartPunctuationPause: true,
   metronomeSound: false,
@@ -124,6 +132,8 @@ export default function App() {
           if (!['subtle', 'moderate', 'dynamic'].includes(merged.driftIntensity as string)) {
             merged.driftIntensity = 'moderate';
           }
+          merged.letterSpacingPreset = resolveLetterSpacingPreset(merged);
+          merged.letterSpacing = resolveLetterSpacingEm(merged);
           return merged;
         }
       }
@@ -401,53 +411,107 @@ export default function App() {
 
   // 6. Window-level Drag & Drop for Universal Input Hub
   const [isWindowDragging, setIsWindowDragging] = useState(false);
-  const dragCounterRef = useRef(0);
+  const [pendingDroppedFile, setPendingDroppedFile] = useState<File | null>(null);
+  const dragWatchdogRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearWindowDrag = useCallback(() => {
+    if (dragWatchdogRef.current) {
+      clearTimeout(dragWatchdogRef.current);
+      dragWatchdogRef.current = null;
+    }
+    setIsWindowDragging(false);
+  }, []);
 
   useEffect(() => {
-    const handleDragEnter = (e: DragEvent) => {
-      e.preventDefault();
-      dragCounterRef.current += 1;
-      if (e.dataTransfer?.types?.includes('Files')) {
-        setIsWindowDragging(true);
+    const hasFilesInDrag = (e: DragEvent): boolean => {
+      const types = e.dataTransfer?.types;
+      if (!types) return false;
+      return Array.from(types).includes('Files');
+    };
+
+    const scheduleWatchdog = () => {
+      if (dragWatchdogRef.current) {
+        clearTimeout(dragWatchdogRef.current);
       }
+      // Browser fires dragover every ~50ms while a file is actively held over the window;
+      // if no dragover occurs within 200ms, the drag has ended or left the window/iframe.
+      dragWatchdogRef.current = setTimeout(() => {
+        setIsWindowDragging(false);
+      }, 200);
+    };
+
+    const handleDragEnter = (e: DragEvent) => {
+      if (!hasFilesInDrag(e)) return;
+      e.preventDefault();
+      setIsWindowDragging(true);
+      scheduleWatchdog();
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!hasFilesInDrag(e)) return;
+      e.preventDefault();
+      setIsWindowDragging(true);
+      scheduleWatchdog();
     };
 
     const handleDragLeave = (e: DragEvent) => {
       e.preventDefault();
-      dragCounterRef.current -= 1;
-      if (dragCounterRef.current <= 0) {
-        dragCounterRef.current = 0;
-        setIsWindowDragging(false);
-      }
-    };
+      const related = e.relatedTarget as Node | null;
+      const leftViewport =
+        !related ||
+        !document.documentElement.contains(related) ||
+        e.clientX <= 0 ||
+        e.clientY <= 0 ||
+        e.clientX >= window.innerWidth ||
+        e.clientY >= window.innerHeight;
 
-    const handleDragOver = (e: DragEvent) => {
-      e.preventDefault();
+      if (leftViewport) {
+        clearWindowDrag();
+      }
     };
 
     const handleDrop = (e: DragEvent) => {
       e.preventDefault();
-      dragCounterRef.current = 0;
-      setIsWindowDragging(false);
+      clearWindowDrag();
 
       const files = e.dataTransfer?.files;
       if (files && files.length > 0) {
+        const targetEl = e.target as HTMLElement | null;
+        const droppedInsideDropZone = Boolean(targetEl?.closest?.('#universal-dropzone'));
+        if (!droppedInsideDropZone) {
+          setPendingDroppedFile(files[0]);
+        }
         setIsTextInputOpen(true);
       }
     };
 
-    window.addEventListener('dragenter', handleDragEnter);
-    window.addEventListener('dragleave', handleDragLeave);
-    window.addEventListener('dragover', handleDragOver);
-    window.addEventListener('drop', handleDrop);
+    const handleDragEndOrCancel = () => {
+      clearWindowDrag();
+    };
+
+    window.addEventListener('dragenter', handleDragEnter, { capture: true });
+    window.addEventListener('dragover', handleDragOver, { capture: true });
+    window.addEventListener('dragleave', handleDragLeave, { capture: true });
+    window.addEventListener('drop', handleDrop, { capture: true });
+    window.addEventListener('dragend', handleDragEndOrCancel, { capture: true });
+    window.addEventListener('mousemove', handleDragEndOrCancel, { capture: true, passive: true });
+    window.addEventListener('mousedown', handleDragEndOrCancel, { capture: true, passive: true });
+    window.addEventListener('keydown', handleDragEndOrCancel, { capture: true, passive: true });
+    window.addEventListener('blur', handleDragEndOrCancel);
 
     return () => {
-      window.removeEventListener('dragenter', handleDragEnter);
-      window.removeEventListener('dragleave', handleDragLeave);
-      window.removeEventListener('dragover', handleDragOver);
-      window.removeEventListener('drop', handleDrop);
+      clearWindowDrag();
+      window.removeEventListener('dragenter', handleDragEnter, { capture: true });
+      window.removeEventListener('dragover', handleDragOver, { capture: true });
+      window.removeEventListener('dragleave', handleDragLeave, { capture: true });
+      window.removeEventListener('drop', handleDrop, { capture: true });
+      window.removeEventListener('dragend', handleDragEndOrCancel, { capture: true });
+      window.removeEventListener('mousemove', handleDragEndOrCancel, { capture: true });
+      window.removeEventListener('mousedown', handleDragEndOrCancel, { capture: true });
+      window.removeEventListener('keydown', handleDragEndOrCancel, { capture: true });
+      window.removeEventListener('blur', handleDragEndOrCancel);
     };
-  }, []);
+  }, [clearWindowDrag]);
 
   const handleStartTimer = useCallback((durationMinutes = 15) => {
     const totalSecs = durationMinutes * 60;
@@ -492,6 +556,11 @@ export default function App() {
   const handleUpdateSettings = useCallback((updater: Partial<ReaderSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...updater };
+      if (updater.letterSpacingPreset !== undefined && updater.letterSpacing === undefined) {
+        next.letterSpacing = resolveLetterSpacingEm({ letterSpacingPreset: updater.letterSpacingPreset });
+      } else if (updater.letterSpacing !== undefined && updater.letterSpacingPreset === undefined) {
+        next.letterSpacingPreset = resolveLetterSpacingPreset({ letterSpacing: updater.letterSpacing });
+      }
       try {
         safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(next));
       } catch {
@@ -1172,6 +1241,8 @@ export default function App() {
           setIsExtensionHubOpen(true);
         }}
         settings={settings}
+        initialDroppedFile={pendingDroppedFile}
+        onClearDroppedFile={() => setPendingDroppedFile(null)}
       />
 
       <ExtensionHubModal
@@ -1231,9 +1302,10 @@ export default function App() {
       />
 
       {/* Global Drag & Drop Overlay */}
-      {isWindowDragging && (
+      {isWindowDragging && !isTextInputOpen && (
         <div 
           id="window-drag-overlay"
+          onClick={clearWindowDrag}
           className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 pointer-events-none animate-in fade-in duration-150"
         >
           <div className="p-8 rounded-3xl border-2 border-dashed border-red-500 bg-red-500/10 text-center max-w-md shadow-2xl">
